@@ -23,8 +23,10 @@ if hasattr(sys.stderr, "reconfigure"):
 
 
 def load_config() -> dict:
+    if not CONFIG_PATH.exists():
+        return {}
     with CONFIG_PATH.open("r", encoding="utf-8") as fh:
-        return yaml.safe_load(fh)
+        return yaml.safe_load(fh) or {}
 
 
 def run_download_cycle(status_callback=None) -> int:

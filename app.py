@@ -24,7 +24,7 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
-APP_VERSION = "1.0.2"
+APP_VERSION = "1.0.3"
 
 CONFIG_PATH = paths.CONFIG_PATH
 STATE_FILE  = paths.STATE_FILE
@@ -42,7 +42,32 @@ _MAX_LOG = 100
 # Config / state helpers
 # ──────────────────────────────────────────────────────────────────────────────
 
+_DEFAULT_CONFIG = """\
+# Manga Downloader — configuration file
+# Edit this file or use the web UI at http://localhost:8080/config
+
+nas_path: "C:/Manga"          # folder where CBZ chapters are saved
+check_interval_hours: 6       # how often to auto-scan for new chapters
+language: "en"
+image_quality: "data"         # "data" = full quality, "data-saver" = compressed
+max_chapters_per_run: 0       # 0 = unlimited (download until caught up)
+page_delay: 0.3               # seconds between page downloads
+chapter_delay: 1.0            # seconds between chapters
+web_port: 8080
+
+manga: []                     # add MangaDex manga via the Config page
+
+third_party_sites: []         # add third-party scrapers via the Config page
+"""
+
+def _ensure_config() -> None:
+    """Create a starter config.yaml next to the EXE if one does not exist."""
+    if not CONFIG_PATH.exists():
+        CONFIG_PATH.write_text(_DEFAULT_CONFIG, encoding="utf-8")
+        log.info("Created default config.yaml at %s", CONFIG_PATH)
+
 def _load_config() -> dict:
+    _ensure_config()
     with CONFIG_PATH.open("r", encoding="utf-8") as fh:
         return yaml.safe_load(fh) or {}
 
