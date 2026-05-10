@@ -24,6 +24,8 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
+APP_VERSION = "1.0.1"
+
 CONFIG_PATH = paths.CONFIG_PATH
 STATE_FILE  = paths.STATE_FILE
 
@@ -131,6 +133,7 @@ def api_status():
         "last_scan": meta.get("last_scan"),
         "next_scan": meta.get("next_scan"),
         "scanning": _scanning,
+        "version": APP_VERSION,
     })
 
 

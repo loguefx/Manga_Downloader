@@ -64,6 +64,7 @@ small { color: var(--text-secondary); font-size: 11px; }
 }
 .nav-link:hover { color: var(--text-primary); background: var(--bg-card); text-decoration: none; }
 .nav-link.active { color: var(--accent); background: var(--accent-dim); }
+.nav-version { font-size: 11px; color: var(--text-muted); padding: 4px 8px; border: 1px solid var(--border); border-radius: 4px; margin-left: 6px; letter-spacing: .03em; }
 
 /* ── Main layout ───────────────────────────────────────────────────────────── */
 .main-content { padding: 28px; max-width: 1400px; margin: 0 auto; }
