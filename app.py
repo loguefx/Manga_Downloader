@@ -1,0 +1,282 @@
+"""
+Flask web application — serves the Manga Downloader dashboard and REST API.
+Also runs the download scheduler in a background thread.
+"""
+
+import io
+import json
+import logging
+import sys
+import threading
+from datetime import datetime
+from pathlib import Path
+
+import schedule
+import yaml
+from flask import Flask, jsonify, render_template, request, send_file, abort
+
+import downloader
+import scheduler as sched
+import paths
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
+
+CONFIG_PATH = paths.CONFIG_PATH
+STATE_FILE  = paths.STATE_FILE
+
+app = Flask(__name__, template_folder=paths.TEMPLATE_FOLDER, static_folder=paths.STATIC_FOLDER)
+log = logging.getLogger(__name__)
+
+_scan_lock = threading.Lock()
+_scanning = False
+_scan_log: list[str] = []
+_MAX_LOG = 100
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Config / state helpers
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _load_config() -> dict:
+    with CONFIG_PATH.open("r", encoding="utf-8") as fh:
+        return yaml.safe_load(fh) or {}
+
+
+def _save_config(data: dict) -> None:
+    with CONFIG_PATH.open("w", encoding="utf-8") as fh:
+        yaml.dump(data, fh, allow_unicode=True, sort_keys=False)
+
+
+def _load_state() -> dict:
+    return downloader.load_state()
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Background scheduler
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _scheduler_loop() -> None:
+    """Runs in a daemon thread; fires the download cycle on the configured interval."""
+    cfg = _load_config()
+    interval: float = float(cfg.get("check_interval_hours", 6))
+    schedule.every(interval).hours.do(_trigger_scan)
+    log.info("Scheduler started — will scan every %.1f hour(s).", interval)
+    while True:
+        schedule.run_pending()
+        import time; time.sleep(60)
+
+
+def _trigger_scan() -> None:
+    global _scanning
+    if _scanning:
+        log.info("Scan already running, skipping scheduled trigger.")
+        return
+    thread = threading.Thread(target=_run_scan_thread, daemon=True)
+    thread.start()
+
+
+def _run_scan_thread() -> None:
+    global _scanning, _scan_log
+    with _scan_lock:
+        _scanning = True
+        _scan_log = []
+        try:
+            def _log_cb(msg: str, level: str = "info"):
+                from datetime import datetime as _dt
+                entry = {
+                    "msg": msg,
+                    "level": level,
+                    "time": _dt.now().strftime("%H:%M:%S"),
+                }
+                _scan_log.append(entry)
+                if len(_scan_log) > _MAX_LOG:
+                    _scan_log.pop(0)
+            sched.run_download_cycle(status_callback=_log_cb)
+        finally:
+            _scanning = False
+
+
+def start_scheduler() -> None:
+    """Start the background scheduler thread. Called at app startup."""
+    t = threading.Thread(target=_scheduler_loop, daemon=True, name="scheduler")
+    t.start()
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Pages
+# ──────────────────────────────────────────────────────────────────────────────
+
+@app.route("/")
+def index():
+    return render_template("index.html")
+
+
+@app.route("/config")
+def config_page():
+    return render_template("config.html")
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# REST API — status
+# ──────────────────────────────────────────────────────────────────────────────
+
+@app.route("/api/status")
+def api_status():
+    state = _load_state()
+    meta = state.get("_meta", {})
+    return jsonify({
+        "last_scan": meta.get("last_scan"),
+        "next_scan": meta.get("next_scan"),
+        "scanning": _scanning,
+    })
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# REST API — manga list
+# ──────────────────────────────────────────────────────────────────────────────
+
+@app.route("/api/manga")
+def api_manga():
+    cfg = _load_config()
+    state = _load_state()
+    result = []
+
+    # MangaDex entries
+    for entry in cfg.get("manga", []):
+        manga_id = entry.get("id", "").strip()
+        if not manga_id:
+            continue
+        manga_state = state.get(manga_id, {})
+        chapters_map: dict = manga_state.get("chapters", {})
+
+        chapter_list = sorted(
+            [
+                {
+                    "number": float(k),
+                    "downloaded_at": v.get("downloaded_at", ""),
+                }
+                for k, v in chapters_map.items()
+            ],
+            key=lambda x: x["number"],
+            reverse=True,
+        )
+
+        result.append({
+            "id": manga_id,
+            "name": entry.get("name") or manga_state.get("title") or manga_id,
+            "source": "MangaDex",
+            "total_chapters": len(chapters_map),
+            "latest_chapter": manga_state.get("last_chapter"),
+            "chapters": chapter_list,
+        })
+
+    # Third-party site entries
+    import re as _re
+    for site in cfg.get("third_party_sites", []):
+        if not site.get("enabled", False):
+            continue
+        site_name = site.get("name", "Unknown")
+        state_key = f"_site_{_re.sub(r'[^a-z0-9]', '_', site_name.lower())}"
+        site_state = state.get(state_key, {})
+        chapters_map = site_state.get("chapters", {})
+        chapter_list = sorted(
+            [{"number": float(k), "downloaded_at": v.get("downloaded_at", "")}
+             for k, v in chapters_map.items()],
+            key=lambda x: x["number"], reverse=True,
+        )
+        result.append({
+            "id": state_key,
+            "name": site_name,
+            "source": "3rd Party",
+            "total_chapters": len(chapters_map),
+            "latest_chapter": site_state.get("last_chapter"),
+            "chapters": chapter_list,
+        })
+
+    return jsonify(result)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# REST API — cover images (proxied from NAS)
+# ──────────────────────────────────────────────────────────────────────────────
+
+@app.route("/api/cover/<path:manga_name>")
+def api_cover(manga_name):
+    cfg = _load_config()
+    nas_path = cfg.get("nas_path", "")
+    cover_path = Path(nas_path) / manga_name / "folder.jpg"
+    if cover_path.exists():
+        return send_file(cover_path, mimetype="image/jpeg")
+    abort(404)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# REST API — manual scan trigger
+# ──────────────────────────────────────────────────────────────────────────────
+
+@app.route("/api/scan-log")
+def api_scan_log():
+    return jsonify({"log": _scan_log, "scanning": _scanning})
+
+
+@app.route("/api/scan", methods=["POST"])
+def api_scan():
+    if _scanning:
+        return jsonify({"success": False, "message": "A scan is already in progress."})
+    thread = threading.Thread(target=_run_scan_thread, daemon=True)
+    thread.start()
+    return jsonify({"success": True, "message": "Scan started."})
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# REST API — config CRUD
+# ──────────────────────────────────────────────────────────────────────────────
+
+@app.route("/api/config", methods=["GET"])
+def api_get_config():
+    return jsonify(_load_config())
+
+
+@app.route("/api/config", methods=["POST"])
+def api_save_config():
+    data = request.get_json(force=True)
+    if not data:
+        return jsonify({"success": False, "message": "No data received."}), 400
+    _save_config(data)
+    # Reschedule with new interval
+    schedule.clear()
+    interval = float(data.get("check_interval_hours", 6))
+    schedule.every(interval).hours.do(_trigger_scan)
+    return jsonify({"success": True})
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Startup
+# ──────────────────────────────────────────────────────────────────────────────
+
+def run_flask(host: str = "0.0.0.0", port: int = None) -> None:
+    cfg = _load_config()
+    port = port or int(cfg.get("web_port", 8080))
+    app.run(host=host, port=port, use_reloader=False, threaded=True)
+
+
+if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s  %(levelname)-8s  %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        handlers=[
+            logging.StreamHandler(sys.stdout),
+            logging.FileHandler(
+                paths.LOG_FILE, encoding="utf-8"
+            ),
+        ],
+    )
+    cfg = _load_config()
+    port = int(cfg.get("web_port", 8080))
+    log.info("Starting Manga Downloader web UI on http://localhost:%d", port)
+    start_scheduler()
+    run_flask(port=port)

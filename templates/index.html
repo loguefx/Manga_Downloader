@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — Manga Downloader{% endblock %}
+
+{% block content %}
+
+<!-- Status Bar -->
+<div class="status-bar" id="statusBar">
+  <div class="status-info">
+    <span class="status-dot" id="statusDot"></span>
+    <span id="statusText">Loading...</span>
+  </div>
+  <div class="status-actions">
+    <span class="scan-times">
+      <span class="label">Last scan:</span>
+      <span id="lastScan">—</span>
+      &nbsp;&nbsp;
+      <span class="label">Next scan:</span>
+      <span id="nextScan">—</span>
+    </span>
+    <button class="btn btn-primary" id="scanNowBtn" onclick="triggerScan()">
+      Scan Now
+    </button>
+  </div>
+</div>
+
+<!-- Live Scan Log -->
+<div class="scan-log-panel hidden" id="scanLogPanel">
+  <div class="scan-log-header">
+    <div class="scan-log-title">
+      <span class="spinner scan-spinner" id="scanSpinner" style="width:14px;height:14px;border-width:2px"></span>
+      <span id="scanLogTitle">Scan in progress...</span>
+    </div>
+    <button class="btn-ghost" onclick="document.getElementById('scanLogPanel').classList.add('hidden')" title="Hide">&times;</button>
+  </div>
+  <div class="scan-log-body" id="scanLogBody"></div>
+</div>
+
+<!-- Manga Grid -->
+<div class="section-header">
+  <h2>Your Manga Library</h2>
+  <span class="count-badge" id="mangaCount">0 series</span>
+</div>
+
+<div class="manga-grid" id="mangaGrid">
+  <div class="loading-state">
+    <div class="spinner"></div>
+    <p>Loading library...</p>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+  initDashboard();
+</script>
+{% endblock %}

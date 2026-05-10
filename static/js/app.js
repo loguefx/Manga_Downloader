@@ -1,0 +1,393 @@
+/* ── Utilities ──────────────────────────────────────────────────────────────── */
+
+function timeAgo(isoStr) {
+  if (!isoStr) return "never";
+  const diff = (Date.now() - new Date(isoStr).getTime()) / 1000;
+  if (diff < 60)   return "just now";
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return `${Math.floor(diff / 86400)}d ago`;
+}
+
+function timeUntil(isoStr) {
+  if (!isoStr) return "—";
+  const diff = (new Date(isoStr).getTime() - Date.now()) / 1000;
+  if (diff <= 0)   return "now";
+  if (diff < 3600) return `${Math.floor(diff / 60)}m`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
+  return `${Math.floor(diff / 86400)}d`;
+}
+
+function formatDate(isoStr) {
+  if (!isoStr || isoStr === "pre-existing") return isoStr || "—";
+  try {
+    return new Date(isoStr).toLocaleString(undefined, {
+      month: "short", day: "numeric", year: "numeric",
+      hour: "2-digit", minute: "2-digit"
+    });
+  } catch { return isoStr; }
+}
+
+/* ── Dashboard ──────────────────────────────────────────────────────────────── */
+
+function initDashboard() {
+  refreshStatus();
+  loadManga();
+  setInterval(refreshStatus, 15000);
+}
+
+async function refreshStatus() {
+  try {
+    const data = await fetch("/api/status").then(r => r.json());
+    const dot  = document.getElementById("statusDot");
+    const text = document.getElementById("statusText");
+    const btn  = document.getElementById("scanNowBtn");
+
+    if (data.scanning) {
+      dot.className  = "status-dot scanning";
+      text.textContent = "Scanning for new chapters...";
+      if (btn) btn.disabled = true;
+    } else {
+      dot.className  = "status-dot idle";
+      text.textContent = "Idle — ready to scan";
+      if (btn) btn.disabled = false;
+    }
+    refreshScanLog(data.scanning);
+
+    const lastEl = document.getElementById("lastScan");
+    const nextEl = document.getElementById("nextScan");
+    if (lastEl) lastEl.textContent = timeAgo(data.last_scan);
+    if (nextEl) nextEl.textContent = data.next_scan ? `in ${timeUntil(data.next_scan)}` : "—";
+  } catch { /* network error, ignore */ }
+}
+
+let _logPollTimer = null;
+
+function _fmtTime() {
+  const now = new Date();
+  return now.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"});
+}
+
+async function refreshScanLog(scanning) {
+  const panel   = document.getElementById("scanLogPanel");
+  const body    = document.getElementById("scanLogBody");
+  const title   = document.getElementById("scanLogTitle");
+  const spinner = document.getElementById("scanSpinner");
+  if (!panel || !body) return;
+
+  try {
+    const data = await fetch("/api/scan-log").then(r => r.json());
+    const hasContent = data.log && data.log.length > 0;
+
+    if (hasContent || data.scanning) {
+      panel.classList.remove("hidden");
+    }
+
+    if (hasContent) {
+      const atBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 40;
+      body.innerHTML = data.log.map(entry => {
+        const msg   = typeof entry === "string" ? entry : entry.msg;
+        const level = typeof entry === "string" ? "info" : (entry.level || "info");
+        const time  = entry.time || "";
+        return `<div class="log-line level-${level}"><span class="log-time">${time}</span><span class="log-text">${escHtml(msg)}</span></div>`;
+      }).join("");
+      if (atBottom) body.scrollTop = body.scrollHeight;
+    }
+
+    if (data.scanning) {
+      if (title) title.textContent = "Scan in progress...";
+      if (spinner) spinner.style.display = "";
+      if (!_logPollTimer) _logPollTimer = setInterval(() => refreshScanLog(true), 2000);
+    } else {
+      if (title) title.textContent = hasContent ? "Last scan complete" : "Scan log";
+      if (spinner) spinner.style.display = "none";
+      if (_logPollTimer) { clearInterval(_logPollTimer); _logPollTimer = null; }
+    }
+  } catch { /* ignore */ }
+}
+
+function escHtml(str) {
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+async function loadManga() {
+  const grid = document.getElementById("mangaGrid");
+  const countBadge = document.getElementById("mangaCount");
+  try {
+    const manga = await fetch("/api/manga").then(r => r.json());
+    countBadge.textContent = `${manga.length} series`;
+
+    if (!manga.length) {
+      grid.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-icon">&#128366;</div>
+          <p>No manga configured yet.</p>
+          <a href="/config" class="btn btn-primary" style="margin-top:8px">Go to Config</a>
+        </div>`;
+      return;
+    }
+
+    grid.innerHTML = manga.map(m => buildMangaCard(m)).join("");
+  } catch (e) {
+    grid.innerHTML = `<div class="empty-state"><p>Failed to load library: ${e.message}</p></div>`;
+  }
+}
+
+function buildMangaCard(m) {
+  const coverUrl   = `/api/cover/${encodeURIComponent(m.name)}`;
+  const latestChap = m.latest_chapter != null ? `Ch. ${m.latest_chapter}` : "—";
+  const recentChap = m.chapters.length ? m.chapters[0] : null;
+  const recentStr  = recentChap
+    ? `Ch. ${recentChap.number} &mdash; ${formatDate(recentChap.downloaded_at)}`
+    : "None yet";
+
+  const chapRows = m.chapters.slice(0, 200).map(c => `
+    <div class="chapter-row">
+      <span class="chapter-num">Chapter ${c.number}</span>
+      <span class="chapter-date">${formatDate(c.downloaded_at)}</span>
+    </div>`).join("");
+
+  const cardId = `card-${m.id.replace(/[^a-z0-9]/gi, "_")}`;
+
+  return `
+    <div class="manga-card" id="${cardId}">
+      <div class="manga-card-header">
+        <img class="manga-cover"
+             src="${coverUrl}"
+             alt="cover"
+             onerror="this.outerHTML='<div class=\\'manga-cover-placeholder\\'>&#128366;</div>'" />
+        <div class="manga-meta">
+          <div class="manga-title" title="${m.name}">${m.name}</div>
+          <div class="manga-source-badge ${m.source === 'MangaDex' ? 'mangadex' : m.source === 'Web Scraper' ? 'scraper' : 'third'}">${m.source}</div>
+          <div class="manga-stats">
+            <div class="stat-row">
+              <span>Chapters on NAS</span>
+              <span class="stat-value">${m.total_chapters}</span>
+            </div>
+            <div class="stat-row">
+              <span>Latest chapter</span>
+              <span class="stat-value">${latestChap}</span>
+            </div>
+            <div class="stat-row" style="flex-direction:column;gap:2px">
+              <span>Last downloaded</span>
+              <span class="stat-value" style="font-size:11px">${recentStr}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="manga-card-footer">
+        <button class="chapters-toggle" onclick="toggleChapters('${cardId}')">
+          <span>Chapter history (${m.chapters.length})</span>
+          <span class="toggle-arrow" id="arrow-${cardId}">&#9660;</span>
+        </button>
+        <div class="chapters-list" id="chaplist-${cardId}">
+          ${chapRows || '<div class="chapter-row"><span class="chapter-date">No chapters recorded yet.</span></div>'}
+        </div>
+      </div>
+    </div>`;
+}
+
+function toggleChapters(cardId) {
+  const list  = document.getElementById(`chaplist-${cardId}`);
+  const arrow = document.getElementById(`arrow-${cardId}`);
+  list.classList.toggle("open");
+  arrow.classList.toggle("open");
+}
+
+async function triggerScan() {
+  const btn = document.getElementById("scanNowBtn");
+  if (btn) btn.disabled = true;
+  try {
+    const r = await fetch("/api/scan", { method: "POST" }).then(r => r.json());
+    if (!r.success) alert(r.message);
+    else {
+      refreshStatus();
+      // Poll until scan finishes then reload manga list
+      const poll = setInterval(async () => {
+        const s = await fetch("/api/status").then(r => r.json());
+        if (!s.scanning) {
+          clearInterval(poll);
+          loadManga();
+          refreshStatus();
+        }
+      }, 3000);
+    }
+  } catch (e) { alert("Could not contact server: " + e.message); }
+}
+
+/* ── Config page ────────────────────────────────────────────────────────────── */
+
+let _currentConfig = {};
+
+async function initConfig() {
+  _currentConfig = await fetch("/api/config").then(r => r.json());
+  populateForm(_currentConfig);
+}
+
+function populateForm(cfg) {
+  setValue("nas_path",              cfg.nas_path ?? "");
+  setValue("check_interval_hours",  cfg.check_interval_hours ?? 6);
+  setValue("language",              cfg.language ?? "en");
+  setValue("image_quality",         cfg.image_quality ?? "data");
+  setValue("page_delay_seconds",    cfg.page_delay_seconds ?? 0.5);
+  setValue("chapter_delay_seconds", cfg.chapter_delay_seconds ?? 2);
+  setValue("max_chapters_per_run",  cfg.max_chapters_per_run ?? 0);
+  setValue("web_port",              cfg.web_port ?? 8080);
+
+  renderMangaTable(cfg.manga ?? []);
+  renderSitesTable(cfg.third_party_sites ?? []);
+}
+
+function setValue(id, val) {
+  const el = document.getElementById(id);
+  if (el) el.value = val;
+}
+
+function renderMangaTable(list) {
+  const tbody = document.getElementById("mangaTableBody");
+  if (!tbody) return;
+  tbody.innerHTML = list.map((m, i) => `
+    <tr id="manga-row-${i}">
+      <td>${m.id}</td>
+      <td>${m.name ?? ""}</td>
+      <td><button class="btn btn-danger" onclick="removeMangaRow(${i})">Remove</button></td>
+    </tr>`).join("");
+  tbody._list = list.slice();
+}
+
+function addMangaRow() {
+  const rawId  = document.getElementById("newMangaId").value.trim();
+  const name   = document.getElementById("newMangaName").value.trim();
+
+  // Extract UUID from a full URL if pasted
+  const uuidMatch = rawId.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+  const id = uuidMatch ? uuidMatch[0] : rawId;
+
+  if (!id) { alert("Please enter a MangaDex UUID or URL."); return; }
+
+  const tbody = document.getElementById("mangaTableBody");
+  const list  = tbody._list || [];
+  if (list.some(m => m.id === id)) { alert("This manga is already in your list."); return; }
+
+  list.push({ id, name: name || "" });
+  renderMangaTable(list);
+  document.getElementById("newMangaId").value   = "";
+  document.getElementById("newMangaName").value = "";
+  saveConfig(true);
+}
+
+function removeMangaRow(idx) {
+  const tbody = document.getElementById("mangaTableBody");
+  const list  = tbody._list || [];
+  list.splice(idx, 1);
+  renderMangaTable(list);
+  saveConfig(true);
+}
+
+async function saveConfig(silent = false) {
+  const tbody      = document.getElementById("mangaTableBody");
+  const sitesTbody = document.getElementById("sitesTableBody");
+
+  const newCfg = {
+    ..._currentConfig,
+    nas_path:              document.getElementById("nas_path").value.trim(),
+    check_interval_hours:  parseFloat(document.getElementById("check_interval_hours").value),
+    language:              document.getElementById("language").value.trim(),
+    image_quality:         document.getElementById("image_quality").value,
+    page_delay_seconds:    parseFloat(document.getElementById("page_delay_seconds").value),
+    chapter_delay_seconds: parseFloat(document.getElementById("chapter_delay_seconds").value),
+    max_chapters_per_run:  parseInt(document.getElementById("max_chapters_per_run").value, 10),
+    web_port:              parseInt(document.getElementById("web_port").value, 10),
+    manga: (tbody._list || []),
+    third_party_sites: (sitesTbody._list || []),
+    scrapers: {}
+  };
+
+  try {
+    const r = await fetch("/api/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(newCfg),
+    }).then(r => r.json());
+
+    if (r.success) {
+      _currentConfig = newCfg;
+      if (!silent) showMsg("Settings saved successfully.", true);
+    } else {
+      showMsg(`Error: ${r.message}`, false);
+    }
+  } catch (e) {
+    showMsg("Failed to save: " + e.message, false);
+  }
+}
+
+/* ── Third-party sites table ─────────────────────────────────────────────── */
+
+function renderSitesTable(list) {
+  const tbody = document.getElementById("sitesTableBody");
+  if (!tbody) return;
+  tbody.innerHTML = list.map((s, i) => `
+    <tr id="site-row-${i}">
+      <td>${s.name ?? ""}</td>
+      <td style="word-break:break-all;font-size:11px">${s.base_url ?? ""}</td>
+      <td><code>${s.chapter_url_template ?? "{base_url}/c{num}"}</code></td>
+      <td>${s.nas_folder ?? s.name ?? ""}</td>
+      <td>
+        <label class="toggle" style="margin:0">
+          <input type="checkbox" ${s.enabled ? "checked" : ""}
+                 onchange="toggleSite(${i}, this.checked)" />
+          <span class="toggle-slider"></span>
+        </label>
+      </td>
+      <td><button class="btn btn-danger" onclick="removeSiteRow(${i})">Remove</button></td>
+    </tr>`).join("");
+  tbody._list = list.slice();
+}
+
+function toggleSite(idx, enabled) {
+  const tbody = document.getElementById("sitesTableBody");
+  if (!tbody._list) return;
+  tbody._list[idx].enabled = enabled;
+}
+
+function addSiteRow() {
+  const name     = document.getElementById("newSiteName").value.trim();
+  const base_url = document.getElementById("newSiteUrl").value.trim();
+  const template = document.getElementById("newSiteTemplate").value.trim() || "{base_url}/c{num}";
+  const folder   = document.getElementById("newSiteFolder").value.trim() || name;
+
+  if (!name || !base_url) { alert("Name and Base URL are required."); return; }
+
+  const tbody = document.getElementById("sitesTableBody");
+  const list  = tbody._list || [];
+  if (list.some(s => s.base_url === base_url)) {
+    alert("This site is already in your list."); return;
+  }
+
+  list.push({ name, base_url, chapter_url_template: template, nas_folder: folder, enabled: true });
+  renderSitesTable(list);
+
+  document.getElementById("newSiteName").value = "";
+  document.getElementById("newSiteUrl").value  = "";
+  document.getElementById("newSiteFolder").value = "";
+  saveConfig(true);
+}
+
+function removeSiteRow(idx) {
+  const tbody = document.getElementById("sitesTableBody");
+  const list  = tbody._list || [];
+  list.splice(idx, 1);
+  renderSitesTable(list);
+  saveConfig(true);
+}
+
+function showMsg(text, success) {
+  const el = document.getElementById("saveMsg");
+  el.textContent = text;
+  el.className = `save-message ${success ? "success" : "error"}`;
+  el.classList.remove("hidden");
+  setTimeout(() => el.classList.add("hidden"), 4000);
+}

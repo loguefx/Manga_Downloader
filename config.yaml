@@ -1,0 +1,121 @@
+chapter_delay_seconds: 2
+check_interval_hours: 6
+image_quality: data
+language: en
+manga:
+- id: 8a9d2ae3-e896-4308-8c65-21e5e037cbef
+  name: The Forbidden Lust of a Frigid Girl
+- id: d36bea9f-853f-4908-9957-5514b1903e36
+  name: Marika-chan no Koukando wa Bukkowarete iru
+- id: 2fec6641-beb1-4ae9-a32f-204dd06688ac
+  name: The Angel Next Door Spoils Me Rotten
+- id: 8ef11280-30bc-434b-bf61-c61e092905ac
+  name: I Made Friends with the Second Prettiest Girl in My Class
+- id: f40eeb3a-c3a8-404d-a067-ca1831e60088
+  name: Kamiina Botan Fully Blossoms When Drunk
+- id: 26e4421f-cef8-4775-8bf6-423061d9b43e
+  name: 'Classroom of the Elite: 2nd Year Arc - 2nd Stage'
+- id: 22c844da-1122-4ab3-b726-e7d4b7114254
+  name: Classroom of the Elite - 2nd Year Arc
+- id: 6f81b440-3ece-4d24-ac12-1d460a1a3ca3
+  name: Two-Person Town-Walking
+- id: 8513b78c-cd7e-4efa-90d4-cab852430fd6
+  name: I was Supposed to Never Fall in Love With You.
+- id: 6f2b317e-17ff-491a-8f61-e6e591ae2df2
+  name: Akanabe-sensei Doesn't Know About Embarrassment
+- id: 4fd144b8-fc47-4cf4-afc7-9191d88dcc4a
+  name: I, a Tired Office Worker, Start Living Together with a Beautiful Highschool
+    Girl whom I Met Again After 7 Years
+- id: 94f5cf68-7f42-4ad2-842f-15d5e787c9bb
+  name: Youth Explosion!
+- id: 85b3504c-62e8-49e7-9a81-fb64a3f51def
+  name: Journey Home After School
+- id: 5b6dc8cb-da4b-486d-88db-32f9c60d2dbc
+  name: After Retiring, I Live My Life as a Stud in Another World
+- id: f5c25341-d6ff-4585-8548-3a48fc7654d9
+  name: Akira Failing in Love
+- id: 984df7d5-ae4c-43c6-aa65-737b9f37e5ef
+  name: My Bias Gets on the Last Train
+- id: ee96e2b7-9af2-4864-9656-649f4d3b6fec
+  name: Gals Can't Be Kind to Otaku
+- id: 1464700f-62f5-4ae9-8e90-c2c99ffbf23f
+  name: So This Is What Friends Do.
+- id: 79ca6344-5468-4fa8-8eb7-859728b27156
+  name: I Don't Know Which is Love
+- id: 3bcc56f0-1b71-4542-b7b1-74db4fab2d72
+  name: I Think I Turned My Childhood Friend Into a Girl
+- id: 7991e715-40ae-4c3e-b0e0-aa8bee90ece7
+  name: Me and the Prez, Drinking Under the Stars
+- id: cfc35298-08f5-413a-976a-b0e0461e0ffa
+  name: At Home with a Girl in Her Cute Pajamas
+- id: bb5f1b24-58a6-49e4-847b-a322c2addbd5
+  name: You're the Only One I Can See
+- id: 91a2e0c9-cd81-4bf7-b5f7-bb37434bf6b3
+  name: After School, We Wander in Space
+- id: e2249870-322e-461f-9704-249d49d8fa89
+  name: 'The Gal Sitting Behind Me Likes Me.: Maybe I''m Screwed Already.'
+- id: 3bd65a09-dec5-4c0a-a34f-b07a9cc53aae
+  name: I Made a Contract With Myself
+- id: 50f4173e-744d-4f17-a74e-4e2ea177282d
+  name: Love, Clairvoyance, and Adolescents
+- id: c3295871-b930-4ee3-ac0f-ff7102ecec4e
+  name: Sasha-chan and Her Classmate Otaku-kun
+- id: 8bfde150-22b9-4361-9845-f2bb6957610b
+  name: My Useless "Cuddle" Skill Awakened, and Now I’m Building the Ultimate Harem!
+- id: 4ada20eb-085a-491a-8c49-477ab42014d7
+  name: The Beginning After the End
+- id: 39e52698-160c-4f1a-b368-8fa4ac461c03
+  name: My Girlfriend's Friend
+- id: 73965527-b393-4f65-9bc3-2439ec44935a
+  name: That Time I Was Blackmailed By the Class's Green Tea Bitch
+- id: 9cd31469-d050-4523-b1eb-e019cd7f65d0
+  name: After I Rescued a Cold-Hearted, Black-Haired, Beautiful Girl, She Started
+    Acting Sweet Only When We Were Alone
+- id: 85127c1f-1131-4fb2-9e36-8b45168a99e5
+  name: Don't Touch, Kotesashi-kun
+- id: a9ce0a44-ae4b-40b9-be3d-76e978cbbdad
+  name: Hochiya-san is a Handful
+- id: 9d985413-87c5-4990-9007-d5f4139535f5
+  name: The School's Madonna, Watanabe-san, for Some Reason Asks My Schedule Every
+    Week
+- id: c4ca02fb-8378-433b-8049-fbbea5d25cba
+  name: Haimiya-Senpai is Scary But Cute
+- id: 74ad3ad0-41e2-4919-a3dd-e5061c3444da
+  name: Why Don't You Make the Twins Your "Girlfriend" Together?
+- id: 6370bf37-e997-4a5b-8651-3c5bb60c9c3a
+  name: Mia is back
+- id: 93f59355-6c69-416f-a5fb-84927eb31d42
+  name: 'The Only Thing I''d Do in a No-Boys-Allowed Game World: Reincarnated as a
+    Yuri Ship-Sinker'
+- id: 11fc8f5b-35da-42f2-bb36-9394d1dfa513
+  name: Heartbeat in a Corner
+- id: 008683f7-3464-417e-89f4-26e6c49ebd42
+  name: Official Adultery?
+- id: df361a38-eef6-4674-bec6-86d08aa1d1aa
+  name: Tsumiki Ogami's Not-So-Ordinary Life
+- id: 789642f8-ca89-4e4e-8f7b-eee4d17ea08b
+  name: 'Demon Slayer: Kimetsu no Yaiba'
+- id: 61830b36-1712-4b7b-9421-f671e9ced6d3
+  name: Learning to Love My Cat-like Classmate
+- id: c855ec45-b8d9-4aea-9a0d-b2ae544c11dc
+  name: Tokimori-san Is Completely Defenseless!!
+- id: 5e3a710f-0b0d-482b-9e84-d9c91960c625
+  name: Anjo the Mischievous Gal
+- id: f678b24d-f1fd-4717-8824-4138845390eb
+  name: When I Repaired a Gal's Bicycle, She Became Attached to Me
+max_chapters_per_run: 0
+nas_path: //192.168.0.181/Jellyfin6/Manga
+page_delay_seconds: 0.5
+scrapers: {}
+third_party_sites:
+- base_url: https://mangakatana.com/manga/living-together-with-the-queaen-from-my-high-school-days-who-was-arrogant-surprisingly-isnt-that-uncomfortable.27631
+  chapter_url_template: '{base_url}/c{num}'
+  enabled: true
+  name: Living Together with the Queen
+  nas_folder: Living Together with the Queen
+- base_url: https://ww6.onepiece-manga-online.net/manga/one-piece
+  chapter_url_template: '{base_url}-chapter-{num}'
+  enabled: true
+  name: One Piece
+  nas_folder: One Piece
+web_port: 8080

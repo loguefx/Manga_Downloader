@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.spec.bak
+
+# PyInstaller output
+dist/
+build/
+*.spec.bak
+
+# Runtime / user data (these are generated locally, not committed)
+state.json
+manga_downloader.log
+
+# Environment / IDE
+.env
+.venv/
+venv/
+.vscode/
+.idea/
+*.code-workspace
+
+# OS
+Thumbs.db
+.DS_Store
+desktop.ini

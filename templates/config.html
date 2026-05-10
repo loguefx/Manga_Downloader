@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+{% block title %}Configuration — Manga Downloader{% endblock %}
+
+{% block content %}
+
+<div class="section-header">
+  <h2>Configuration</h2>
+  <button class="btn btn-primary" onclick="saveConfig()">Save All Changes</button>
+</div>
+
+<div id="saveMsg" class="save-message hidden"></div>
+
+<!-- General Settings -->
+<div class="config-card">
+  <h3 class="config-card-title">General Settings</h3>
+  <div class="form-grid">
+
+    <div class="form-group">
+      <label>NAS / Library Path</label>
+      <input type="text" id="nas_path" placeholder="//192.168.0.181/Jellyfin6/Manga" />
+      <small>UNC or local path where manga folders are stored.</small>
+    </div>
+
+    <div class="form-group">
+      <label>Check Interval (hours)</label>
+      <input type="number" id="check_interval_hours" min="1" max="168" step="1" />
+    </div>
+
+    <div class="form-group">
+      <label>Language Code</label>
+      <input type="text" id="language" maxlength="5" placeholder="en" />
+      <small>ISO 639-1 code — "en" for English.</small>
+    </div>
+
+    <div class="form-group">
+      <label>Image Quality</label>
+      <select id="image_quality">
+        <option value="data">Original (data)</option>
+        <option value="data-saver">Compressed (data-saver)</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label>Page Delay (seconds)</label>
+      <input type="number" id="page_delay_seconds" min="0" max="10" step="0.1" />
+      <small>Delay between each page download.</small>
+    </div>
+
+    <div class="form-group">
+      <label>Chapter Delay (seconds)</label>
+      <input type="number" id="chapter_delay_seconds" min="0" max="30" step="1" />
+    </div>
+
+    <div class="form-group">
+      <label>Max Chapters Per Batch</label>
+      <input type="number" id="max_chapters_per_run" min="0" step="1" />
+      <small>0 = download all in one pass.</small>
+    </div>
+
+    <div class="form-group">
+      <label>Web UI Port</label>
+      <input type="number" id="web_port" min="1024" max="65535" />
+      <small>Restart the app after changing the port.</small>
+    </div>
+
+  </div>
+</div>
+
+<!-- MangaDex Manga List -->
+<div class="config-card">
+  <h3 class="config-card-title">MangaDex Manga List</h3>
+  <p class="config-hint">
+    Paste a MangaDex URL or UUID.
+    Example: <code>https://mangadex.org/title/a77742b1-.../one-punch-man</code>
+  </p>
+
+  <table class="manga-table" id="mangaTable">
+    <thead>
+      <tr>
+        <th>MangaDex UUID</th>
+        <th>Display Name</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody id="mangaTableBody"></tbody>
+  </table>
+
+  <div class="add-manga-row">
+    <input type="text" id="newMangaId"   placeholder="UUID or MangaDex URL" />
+    <input type="text" id="newMangaName" placeholder="Display name (optional)" />
+    <button class="btn btn-secondary" onclick="addMangaRow()">+ Add</button>
+  </div>
+</div>
+
+<!-- Third Party Website Scrapers -->
+<div class="config-card">
+  <div class="config-card-header">
+    <h3 class="config-card-title">Third-Party Website Scrapers</h3>
+  </div>
+
+  <p class="config-hint">
+    Add any manga site here. The scraper finds the latest chapter by scanning the
+    chapter list on the site, then downloads and packages the images as a CBZ file.
+    <br><br>
+    <strong>Chapter URL Template</strong> — use <code>{base_url}</code> and <code>{num}</code> as placeholders.<br>
+    &nbsp;&nbsp;MangaKatana: <code>{base_url}/c{num}</code><br>
+    &nbsp;&nbsp;MangaKakalot: <code>{base_url}/chapter-{num}</code>
+  </p>
+
+  <table class="manga-table" id="sitesTable">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Base URL</th>
+        <th>Chapter Template</th>
+        <th>NAS Folder</th>
+        <th>On</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody id="sitesTableBody"></tbody>
+  </table>
+
+  <div class="add-site-form">
+    <h4 style="margin-bottom:12px;font-size:13px;color:var(--text-secondary)">Add New Site</h4>
+    <div class="form-grid">
+      <div class="form-group">
+        <label>Manga Name</label>
+        <input type="text" id="newSiteName" placeholder="Living Together with the Queen" />
+      </div>
+      <div class="form-group full-width">
+        <label>Base URL</label>
+        <input type="text" id="newSiteUrl" placeholder="https://mangakatana.com/manga/my-manga.12345" />
+        <small>The manga's main page URL (no chapter suffix).</small>
+      </div>
+      <div class="form-group">
+        <label>Chapter URL Template</label>
+        <input type="text" id="newSiteTemplate" placeholder="{base_url}/c{num}" value="{base_url}/c{num}" />
+      </div>
+      <div class="form-group">
+        <label>NAS Folder Name</label>
+        <input type="text" id="newSiteFolder" placeholder="Leave blank to use manga name" />
+      </div>
+    </div>
+    <button class="btn btn-secondary" style="margin-top:12px" onclick="addSiteRow()">+ Add Site</button>
+  </div>
+</div>
+
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+  initConfig();
+</script>
+{% endblock %}
