@@ -1,6 +1,8 @@
 # -*- mode: python ; coding: utf-8 -*-
 # PyInstaller spec for Manga Downloader
-# Produces a one-directory bundle: dist/MangaDownloader/MangaDownloader.exe
+# Produces a single self-contained EXE: dist/MangaDownloader.exe
+# Templates, static files and scrapers are embedded inside the EXE and
+# extracted to sys._MEIPASS at runtime (handled by paths.py).
 
 block_cipher = None
 
@@ -43,7 +45,7 @@ a = Analysis(
         'bs4',
         'schedule',
         'tqdm',
-        # Windows Service (optional — only needed if running as a service)
+        # Windows Service (optional)
         'win32serviceutil',
         'win32service',
         'win32event',
@@ -69,16 +71,21 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
+# --onefile: embed everything into a single EXE
 exe = EXE(
     pyz,
     a.scripts,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
     [],
-    exclude_binaries=True,
     name='MangaDownloader',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
+    upx_exclude=[],
+    runtime_tmpdir=None,
     console=True,           # keep console so users can see log output
     disable_windowed_traceback=False,
     argv_emulation=False,
@@ -86,15 +93,4 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=None,
-)
-
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    strip=False,
-    upx=True,
-    upx_exclude=[],
-    name='MangaDownloader',
 )

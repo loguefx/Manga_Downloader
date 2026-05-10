@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     tags:
-      - "v*"          # e.g. v1.0.0  → also creates a GitHub Release
+      - "v*"          # e.g. v1.0.2  → also creates a GitHub Release
   workflow_dispatch:  # allow manual trigger from the GitHub UI
 
 jobs:
@@ -32,25 +32,40 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      # ── Build ───────────────────────────────────────────────────────────────
-      - name: Build with PyInstaller
+      # ── Build single EXE ────────────────────────────────────────────────────
+      - name: Build with PyInstaller (single EXE)
         run: pyinstaller manga_downloader.spec
 
-      # ── Bundle default config ────────────────────────────────────────────────
-      - name: Copy default config.yaml into dist
+      # ── Verify EXE was produced ──────────────────────────────────────────────
+      - name: Verify EXE exists
         run: |
-          Copy-Item config.yaml dist\MangaDownloader\config.yaml
+          if (!(Test-Path "dist\MangaDownloader.exe")) {
+            Write-Error "ERROR: dist\MangaDownloader.exe was not created!"
+            exit 1
+          }
+          $size = (Get-Item "dist\MangaDownloader.exe").Length / 1MB
+          Write-Host "MangaDownloader.exe created — $([math]::Round($size,1)) MB"
 
-      # ── Zip the output folder ────────────────────────────────────────────────
-      - name: Create ZIP archive
+      # ── Bundle EXE + default config into a zip ───────────────────────────────
+      - name: Bundle EXE + config into ZIP
         run: |
-          Compress-Archive -Path dist\MangaDownloader\* -DestinationPath MangaDownloader-windows.zip
+          New-Item -ItemType Directory -Force -Path release_bundle
+          Copy-Item dist\MangaDownloader.exe release_bundle\MangaDownloader.exe
+          Copy-Item config.yaml              release_bundle\config.yaml
+          Compress-Archive -Path release_bundle\* -DestinationPath MangaDownloader-windows.zip
 
-      # ── Upload build artifact (always) ───────────────────────────────────────
-      - name: Upload artifact
+      # ── Upload artifacts (always) ────────────────────────────────────────────
+      - name: Upload EXE artifact
         uses: actions/upload-artifact@v4
         with:
-          name: MangaDownloader-windows
+          name: MangaDownloader-exe
+          path: dist\MangaDownloader.exe
+          retention-days: 30
+
+      - name: Upload ZIP artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MangaDownloader-windows-zip
           path: MangaDownloader-windows.zip
           retention-days: 30
 
@@ -59,5 +74,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: MangaDownloader-windows.zip
+          files: |
+            dist/MangaDownloader.exe
+            MangaDownloader-windows.zip
           generate_release_notes: true
