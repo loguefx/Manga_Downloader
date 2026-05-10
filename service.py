@@ -1,50 +1,49 @@
 """
-Windows Service wrapper for the Manga Downloader.
+Windows Service wrapper for Manga Downloader.
 
-Registers and runs the Flask web app + background scheduler as a Windows Service
-so it starts automatically with Windows and survives reboots/logoffs.
+When installed, Windows starts MangaDownloader.exe automatically on boot
+and keeps it running in the background — no console window, no manual start.
 
-Usage (run as Administrator):
-  python service.py install    # install the service
-  python service.py start      # start it
-  python service.py stop       # stop it
-  python service.py remove     # uninstall
-  python service.py restart    # restart
+Usage (run Command Prompt / PowerShell as Administrator):
 
-Or use install_service.py for a guided install/uninstall.
+  MangaDownloader.exe install   -- install & register the service
+  MangaDownloader.exe start     -- start the service
+  MangaDownloader.exe stop      -- stop the service
+  MangaDownloader.exe restart   -- restart the service
+  MangaDownloader.exe remove    -- stop & uninstall the service
+
+After installing, the service also starts automatically on every reboot.
+The web dashboard is available at http://localhost:8080 once the service is running.
 """
 
-import os
+import logging
 import sys
 import threading
-import logging
 
-# Add project directory to path so imports work when running as a service
-_SVC_DIR = os.path.dirname(os.path.abspath(__file__))
-if _SVC_DIR not in sys.path:
-    sys.path.insert(0, _SVC_DIR)
-
+import win32event
 import win32service
 import win32serviceutil
-import win32event
 import servicemanager
+
+import paths
 
 
 class MangaDownloaderService(win32serviceutil.ServiceFramework):
     _svc_name_         = "MangaDownloader"
     _svc_display_name_ = "Manga Downloader"
     _svc_description_  = (
-        "Downloads manga from MangaDex and serves the web dashboard. "
-        "Runs automatically in the background."
+        "Downloads manga from MangaDex and third-party sites on a schedule. "
+        "Serves the web dashboard at http://localhost:8080. "
+        "Starts automatically with Windows."
     )
 
     def __init__(self, args):
         win32serviceutil.ServiceFramework.__init__(self, args)
         self._stop_event = win32event.CreateEvent(None, 0, 0, None)
-        self._running = True
+        self._running    = True
 
         logging.basicConfig(
-            filename=os.path.join(_SVC_DIR, "manga_downloader.log"),
+            filename=str(paths.LOG_FILE),
             level=logging.INFO,
             format="%(asctime)s  %(levelname)-8s  %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S",
@@ -67,7 +66,8 @@ class MangaDownloaderService(win32serviceutil.ServiceFramework):
     def _run(self):
         import app as flask_app
 
-        # Start Flask + scheduler in a daemon thread
+        flask_app._setup_logging(console=False)
+
         flask_thread = threading.Thread(
             target=flask_app.run_flask,
             daemon=True,
@@ -75,9 +75,9 @@ class MangaDownloaderService(win32serviceutil.ServiceFramework):
         )
         flask_thread.start()
         flask_app.start_scheduler()
-        logging.info("Manga Downloader service started.")
+        logging.info("Manga Downloader service started — dashboard at http://localhost:8080")
 
-        # Block until the service is told to stop
+        # Block until Windows Service Control Manager sends a stop signal
         win32event.WaitForSingleObject(self._stop_event, win32event.INFINITE)
         logging.info("Manga Downloader service stopped.")
 

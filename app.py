@@ -24,7 +24,7 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
-APP_VERSION = "1.0.3"
+APP_VERSION = "1.0.4"
 
 CONFIG_PATH = paths.CONFIG_PATH
 STATE_FILE  = paths.STATE_FILE
@@ -291,20 +291,40 @@ def run_flask(host: str = "0.0.0.0", port: int = None) -> None:
     app.run(host=host, port=port, use_reloader=False, threaded=True)
 
 
-if __name__ == "__main__":
+def _setup_logging(console: bool = True) -> None:
+    handlers = [logging.FileHandler(paths.LOG_FILE, encoding="utf-8")]
+    if console:
+        handlers.append(logging.StreamHandler(sys.stdout))
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s  %(levelname)-8s  %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
-        handlers=[
-            logging.StreamHandler(sys.stdout),
-            logging.FileHandler(
-                paths.LOG_FILE, encoding="utf-8"
-            ),
-        ],
+        handlers=handlers,
     )
+
+
+def _run_normal() -> None:
+    """Start Flask + scheduler in normal console mode."""
+    _setup_logging(console=True)
     cfg = _load_config()
     port = int(cfg.get("web_port", 8080))
     log.info("Starting Manga Downloader web UI on http://localhost:%d", port)
+    log.info("Press Ctrl+C to stop.")
     start_scheduler()
     run_flask(port=port)
+
+
+if __name__ == "__main__":
+    # Service management commands: install / remove / start / stop / restart / debug
+    _SVC_COMMANDS = {"install", "remove", "start", "stop", "restart", "debug", "update"}
+    if len(sys.argv) > 1 and sys.argv[1].lower() in _SVC_COMMANDS:
+        # Delegate to the Windows Service handler (requires Administrator for install/remove)
+        try:
+            import win32serviceutil
+            from service import MangaDownloaderService
+            win32serviceutil.HandleCommandLine(MangaDownloaderService)
+        except ImportError:
+            print("ERROR: pywin32 is not available. Cannot manage Windows Service.")
+            sys.exit(1)
+    else:
+        _run_normal()
