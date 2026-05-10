@@ -1,0 +1,28 @@
+Manga Downloader - Setup Guide
+==============================
+
+1. Extract all files to a permanent folder, e.g.:
+     C:\MangaDownloader\
+
+2. Edit config.yaml - set your nas_path to your NAS/folder path.
+   Or skip this and configure everything via the web UI after starting.
+
+3. Install as a Windows Service (run PowerShell as Administrator):
+
+     cd C:\MangaDownloader
+     .\MangaDownloader.exe install
+     .\MangaDownloader.exe start
+
+4. Access the dashboard at:
+     http://localhost:8080
+   (or http://YOUR-SERVER-IP:8080 from another machine)
+
+Other service commands (run as Administrator):
+  .\MangaDownloader.exe stop      - stop the service
+  .\MangaDownloader.exe restart   - restart after config changes
+  .\MangaDownloader.exe remove    - uninstall the service
+
+Notes:
+- The service starts automatically on every Windows reboot.
+- Logs are written to manga_downloader.log in the same folder.
+- config.yaml is created automatically on first run if missing.

@@ -4,80 +4,51 @@ on:
   push:
     branches: [main]
     tags:
-      - "v*"          # e.g. v1.0.2  → also creates a GitHub Release
-  workflow_dispatch:  # allow manual trigger from the GitHub UI
+      - "v*"
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: windows-latest
     permissions:
-      contents: write   # needed to create releases
+      contents: write
 
     steps:
-      # ── Checkout ────────────────────────────────────────────────────────────
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ── Python ──────────────────────────────────────────────────────────────
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: "pip"
 
-      # ── Dependencies ────────────────────────────────────────────────────────
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pyinstaller
 
-      # ── Build single EXE ────────────────────────────────────────────────────
       - name: Build with PyInstaller (single EXE)
         run: pyinstaller manga_downloader.spec
 
-      # ── Verify EXE was produced ──────────────────────────────────────────────
       - name: Verify EXE exists
         run: |
           if (!(Test-Path "dist\MangaDownloader.exe")) {
-            Write-Error "ERROR: dist\MangaDownloader.exe was not created!"
+            Write-Error "dist\MangaDownloader.exe was not created!"
             exit 1
           }
-          $size = (Get-Item "dist\MangaDownloader.exe").Length / 1MB
-          Write-Host "MangaDownloader.exe created — $([math]::Round($size,1)) MB"
+          $mb = [math]::Round((Get-Item "dist\MangaDownloader.exe").Length / 1MB, 1)
+          Write-Host "MangaDownloader.exe ready - $mb MB"
 
-      # ── Bundle EXE + config + instructions into a zip ───────────────────────
-      - name: Bundle EXE + config into ZIP
+      - name: Bundle EXE + config + readme into ZIP
         run: |
           New-Item -ItemType Directory -Force -Path release_bundle
           Copy-Item dist\MangaDownloader.exe release_bundle\MangaDownloader.exe
           Copy-Item config.yaml              release_bundle\config.yaml
-          @"
-Manga Downloader — Setup Guide
-==============================
-
-1. Extract all files to a permanent folder (e.g. C:\MangaDownloader\)
-
-2. Edit config.yaml — set your nas_path, then open the web UI to add manga.
-
-3. Install as a Windows Service (run PowerShell as Administrator):
-     cd C:\MangaDownloader
-     .\MangaDownloader.exe install
-     .\MangaDownloader.exe start
-
-4. Access the dashboard at: http://localhost:8080
-
-Other service commands (run as Administrator):
-  .\MangaDownloader.exe stop      -- stop the service
-  .\MangaDownloader.exe restart   -- restart after config changes
-  .\MangaDownloader.exe remove    -- uninstall the service
-
-The service starts automatically on every Windows reboot.
-Logs are written to manga_downloader.log in the same folder.
-"@ | Out-File -FilePath release_bundle\INSTALL.txt -Encoding utf8
+          Copy-Item INSTALL.txt              release_bundle\INSTALL.txt
           Compress-Archive -Path release_bundle\* -DestinationPath MangaDownloader-windows.zip
 
-      # ── Upload artifacts (always) ────────────────────────────────────────────
       - name: Upload EXE artifact
         uses: actions/upload-artifact@v4
         with:
@@ -92,7 +63,6 @@ Logs are written to manga_downloader.log in the same folder.
           path: MangaDownloader-windows.zip
           retention-days: 30
 
-      # ── Create GitHub Release (only on version tags) ─────────────────────────
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
