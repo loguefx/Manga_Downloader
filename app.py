@@ -6,6 +6,7 @@ Also runs the download scheduler in a background thread.
 import io
 import json
 import logging
+import subprocess
 import sys
 import threading
 from datetime import datetime
@@ -24,7 +25,7 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
-APP_VERSION = "1.0.5"
+APP_VERSION = "1.0.6"
 
 CONFIG_PATH = paths.CONFIG_PATH
 STATE_FILE  = paths.STATE_FILE
@@ -304,7 +305,7 @@ def _setup_logging(console: bool = True) -> None:
 
 
 def _run_normal() -> None:
-    """Start Flask + scheduler in normal console mode."""
+    """Start Flask + scheduler in normal console mode (fallback / dev mode)."""
     _setup_logging(console=True)
     cfg = _load_config()
     port = int(cfg.get("web_port", 8080))
@@ -314,11 +315,86 @@ def _run_normal() -> None:
     run_flask(port=port)
 
 
+def _auto_service_start() -> None:
+    """
+    Default behaviour when the EXE is launched with no arguments:
+      1. If the Windows Service is already running  -> report and exit.
+      2. If the service is installed but stopped    -> start it and exit.
+      3. If the service is not installed yet        -> install (auto-start) then start.
+      4. If pywin32 is unavailable or anything fails -> fall back to console mode.
+    """
+    _setup_logging(console=True)
+
+    try:
+        import win32service
+        import win32serviceutil
+        import pywintypes
+        from service import MangaDownloaderService
+    except ImportError:
+        log.warning("pywin32 not available — running in console mode.")
+        _run_normal()
+        return
+
+    svc_name = MangaDownloaderService._svc_name_
+    exe      = sys.executable  # path to MangaDownloader.exe when bundled
+
+    # ── Step 1: Check current service state ──────────────────────────────────
+    is_installed = False
+    is_running   = False
+    try:
+        status       = win32serviceutil.QueryServiceStatus(svc_name)
+        is_installed = True
+        is_running   = status[1] == win32service.SERVICE_RUNNING
+    except pywintypes.error:
+        is_installed = False
+
+    if is_installed and is_running:
+        log.info("Manga Downloader service is already running.")
+        log.info("Dashboard: http://localhost:8080")
+        return
+
+    # ── Step 2: Install if not present ───────────────────────────────────────
+    if not is_installed:
+        log.info("Installing Manga Downloader as a Windows Service...")
+        log.info("(This requires Administrator privileges)")
+        try:
+            # Run install in a subprocess so HandleCommandLine's sys.exit()
+            # doesn't kill this process.
+            result = subprocess.run(
+                [exe, "--startup", "auto", "install"],
+                timeout=30,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(f"Install exited with code {result.returncode}")
+            log.info("Service installed successfully.")
+        except Exception as exc:
+            log.error("Service install failed: %s", exc)
+            log.info("Falling back to console mode (run as Administrator to install the service).")
+            _run_normal()
+            return
+
+    # ── Step 3: Start the service ─────────────────────────────────────────────
+    try:
+        log.info("Starting Manga Downloader service...")
+        win32serviceutil.StartService(svc_name)
+        log.info("Service started!  Dashboard -> http://localhost:8080")
+        log.info("The service will start automatically on every reboot.")
+        log.info("")
+        log.info("Management commands (run as Administrator):")
+        log.info("  MangaDownloader.exe stop    - stop the service")
+        log.info("  MangaDownloader.exe restart - restart the service")
+        log.info("  MangaDownloader.exe remove  - uninstall the service")
+    except Exception as exc:
+        log.error("Could not start service: %s", exc)
+        log.info("Falling back to console mode.")
+        _run_normal()
+
+
 if __name__ == "__main__":
-    # Service management commands: install / remove / start / stop / restart / debug
     _SVC_COMMANDS = {"install", "remove", "start", "stop", "restart", "debug", "update"}
+
     if len(sys.argv) > 1 and sys.argv[1].lower() in _SVC_COMMANDS:
-        # Delegate to the Windows Service handler (requires Administrator for install/remove)
+        # Explicit service management command (install / remove / stop / etc.)
         try:
             import win32serviceutil
             from service import MangaDownloaderService
@@ -327,4 +403,5 @@ if __name__ == "__main__":
             print("ERROR: pywin32 is not available. Cannot manage Windows Service.")
             sys.exit(1)
     else:
-        _run_normal()
+        # No arguments: auto-install + start as Windows Service
+        _auto_service_start()

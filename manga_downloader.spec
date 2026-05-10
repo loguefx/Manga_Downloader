@@ -45,11 +45,16 @@ a = Analysis(
         'bs4',
         'schedule',
         'tqdm',
-        # Windows Service (optional)
+        # Windows Service — required
         'win32serviceutil',
         'win32service',
         'win32event',
+        'win32api',
+        'win32con',
+        'pywintypes',
         'servicemanager',
+        # subprocess (used by auto-service-start)
+        'subprocess',
     ],
     hookspath=[],
     hooksconfig={},
