@@ -26,7 +26,7 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
-APP_VERSION = "1.0.7"
+APP_VERSION = "1.0.8"
 
 CONFIG_PATH = paths.CONFIG_PATH
 STATE_FILE  = paths.STATE_FILE
@@ -425,5 +425,24 @@ if __name__ == "__main__":
             print("ERROR: pywin32 is not available. Cannot manage Windows Service.")
             sys.exit(1)
     else:
-        # No arguments: auto-install + start as Windows Service
-        _auto_service_start()
+        # No arguments: could be Windows SCM starting the service, OR user
+        # double-clicking the EXE.
+        #
+        # Try to register with SCM first. If SCM started us, this succeeds
+        # and the service runs properly in the background.
+        #
+        # If the user ran it manually, servicemanager.Initialize() raises
+        # error 1063 (ERROR_FAILED_SERVICE_CONTROLLER_CONNECT) — we catch
+        # that and fall through to _auto_service_start() instead.
+        try:
+            import servicemanager
+            from service import MangaDownloaderService
+            servicemanager.Initialize()
+            servicemanager.PrepareToHostSingle(MangaDownloaderService)
+            servicemanager.StartServiceCtrlDispatcher()
+        except ImportError:
+            # pywin32 not available at all
+            _auto_service_start()
+        except Exception:
+            # Error 1063 = not started by SCM = user ran the EXE directly
+            _auto_service_start()
