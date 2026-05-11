@@ -9,6 +9,7 @@ import logging
 import subprocess
 import sys
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -25,7 +26,7 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
-APP_VERSION = "1.0.6"
+APP_VERSION = "1.0.7"
 
 CONFIG_PATH = paths.CONFIG_PATH
 STATE_FILE  = paths.STATE_FILE
@@ -315,15 +316,39 @@ def _run_normal() -> None:
     run_flask(port=port)
 
 
+def _is_admin() -> bool:
+    """Return True if the current process has Administrator privileges."""
+    try:
+        import ctypes
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
+
+
 def _auto_service_start() -> None:
     """
     Default behaviour when the EXE is launched with no arguments:
-      1. If the Windows Service is already running  -> report and exit.
-      2. If the service is installed but stopped    -> start it and exit.
-      3. If the service is not installed yet        -> install (auto-start) then start.
-      4. If pywin32 is unavailable or anything fails -> fall back to console mode.
+      1. Already running  -> print status and exit cleanly.
+      2. Installed, stopped -> start it and exit.
+      3. Not installed     -> install (auto-start on boot) then start.
+
+    If not running as Administrator, show a clear message and exit — no loop,
+    no fallback to console mode.
     """
+    import time
     _setup_logging(console=True)
+
+    # ── Require admin before doing anything ──────────────────────────────────
+    if not _is_admin():
+        print("")
+        print("  Manga Downloader needs Administrator privileges to install")
+        print("  the Windows Service.")
+        print("")
+        print("  Right-click MangaDownloader.exe and choose")
+        print("  'Run as administrator', then try again.")
+        print("")
+        time.sleep(4)
+        sys.exit(1)
 
     try:
         import win32service
@@ -331,14 +356,13 @@ def _auto_service_start() -> None:
         import pywintypes
         from service import MangaDownloaderService
     except ImportError:
-        log.warning("pywin32 not available — running in console mode.")
-        _run_normal()
-        return
+        log.error("pywin32 is missing — cannot manage Windows Service.")
+        sys.exit(1)
 
     svc_name = MangaDownloaderService._svc_name_
-    exe      = sys.executable  # path to MangaDownloader.exe when bundled
+    exe      = sys.executable
 
-    # ── Step 1: Check current service state ──────────────────────────────────
+    # ── Check current service state ───────────────────────────────────────────
     is_installed = False
     is_running   = False
     try:
@@ -351,43 +375,41 @@ def _auto_service_start() -> None:
     if is_installed and is_running:
         log.info("Manga Downloader service is already running.")
         log.info("Dashboard: http://localhost:8080")
-        return
+        sys.exit(0)
 
-    # ── Step 2: Install if not present ───────────────────────────────────────
+    # ── Install if not present ────────────────────────────────────────────────
     if not is_installed:
-        log.info("Installing Manga Downloader as a Windows Service...")
-        log.info("(This requires Administrator privileges)")
+        log.info("Installing Manga Downloader Windows Service...")
+        # Use a subprocess so HandleCommandLine's internal sys.exit() doesn't
+        # terminate this process. Pass ONLY "install" so the child's sys.argv[1]
+        # is "install" — this routes it straight to HandleCommandLine and avoids
+        # the infinite loop that "--startup auto install" caused.
         try:
-            # Run install in a subprocess so HandleCommandLine's sys.exit()
-            # doesn't kill this process.
-            result = subprocess.run(
-                [exe, "--startup", "auto", "install"],
-                timeout=30,
-            )
+            result = subprocess.run([exe, "install"], timeout=30)
             if result.returncode != 0:
-                raise RuntimeError(f"Install exited with code {result.returncode}")
-            log.info("Service installed successfully.")
+                log.error("Service install failed (exit code %d).", result.returncode)
+                sys.exit(1)
+            log.info("Service installed successfully (auto-start on reboot).")
         except Exception as exc:
             log.error("Service install failed: %s", exc)
-            log.info("Falling back to console mode (run as Administrator to install the service).")
-            _run_normal()
-            return
+            sys.exit(1)
 
-    # ── Step 3: Start the service ─────────────────────────────────────────────
+    # ── Start the service ─────────────────────────────────────────────────────
     try:
         log.info("Starting Manga Downloader service...")
         win32serviceutil.StartService(svc_name)
         log.info("Service started!  Dashboard -> http://localhost:8080")
-        log.info("The service will start automatically on every reboot.")
+        log.info("Starts automatically on every reboot.")
         log.info("")
-        log.info("Management commands (run as Administrator):")
+        log.info("Other commands (run as Administrator):")
         log.info("  MangaDownloader.exe stop    - stop the service")
         log.info("  MangaDownloader.exe restart - restart the service")
         log.info("  MangaDownloader.exe remove  - uninstall the service")
+        time.sleep(2)
+        sys.exit(0)
     except Exception as exc:
         log.error("Could not start service: %s", exc)
-        log.info("Falling back to console mode.")
-        _run_normal()
+        sys.exit(1)
 
 
 if __name__ == "__main__":
