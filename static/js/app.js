@@ -373,11 +373,13 @@ function renderMangaTable(list) {
   if (!tbody) return;
   tbody.innerHTML = list.map((m, i) => `
     <tr id="manga-row-${i}">
-      <td>${m.id}</td>
-      <td>${m.name ?? ""}</td>
+      <td style="font-size:11px;color:var(--text-muted)">${m.id}</td>
+      <td><strong>${escHtml(m.name ?? "")}</strong></td>
       <td><button class="btn btn-danger" onclick="removeMangaRow(${i})">Remove</button></td>
     </tr>`).join("");
   tbody._list = list.slice();
+  const lbl = document.getElementById("mangaCountLabel");
+  if (lbl) lbl.textContent = list.length;
 }
 
 function addMangaRow() {
