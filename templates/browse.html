@@ -1,0 +1,225 @@
+{% extends "base.html" %}
+{% block title %}Browse MangaDex{% endblock %}
+
+{% block content %}
+<div class="browse-header">
+  <div>
+    <h1 class="browse-title">Browse MangaDex</h1>
+    <p class="browse-subtitle">Find manga to add to your library — click a cover to add it instantly.</p>
+  </div>
+  <a href="/config" class="btn btn-secondary" style="flex-shrink:0">&#9881; Config</a>
+</div>
+
+<!-- ── Filters bar ── -->
+<div class="browse-filters">
+  <div class="browse-search-wrap">
+    <input type="text" id="browseSearch" placeholder="Search by title..." autocomplete="off" />
+    <button class="btn btn-primary" onclick="browseSearch()">&#128269; Search</button>
+    <button class="btn btn-secondary" onclick="browseClear()">Clear</button>
+  </div>
+  <div class="browse-sort-wrap">
+    <label>Sort:</label>
+    <button class="sort-btn active" data-sort="popular"  onclick="browseSetSort(this)">&#128293; Popular</button>
+    <button class="sort-btn"        data-sort="latest"   onclick="browseSetSort(this)">&#128337; Latest Upload</button>
+    <button class="sort-btn"        data-sort="new"      onclick="browseSetSort(this)">&#10024; Newest</button>
+    <button class="sort-btn"        data-sort="az"       onclick="browseSetSort(this)">&#127250; A – Z</button>
+  </div>
+</div>
+
+<!-- ── Results info ── -->
+<div class="browse-info">
+  <span id="browseInfo">Loading...</span>
+  <span id="browseLibraryHint" class="browse-library-hint hidden">
+    &#9989; = already in your library
+  </span>
+</div>
+
+<!-- ── Manga grid ── -->
+<div id="browseGrid" class="browse-grid"></div>
+
+<!-- ── Load more / spinner ── -->
+<div class="browse-footer">
+  <div id="browseSpinner" class="browse-spinner hidden">
+    <div class="spinner"></div><span>Loading...</span>
+  </div>
+  <button id="browseLoadMore" class="btn btn-secondary browse-load-more hidden"
+          onclick="browseLoadMore()">Load More</button>
+</div>
+
+<!-- ── Toast notification ── -->
+<div id="browseToast" class="browse-toast hidden"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+/* ── State ── */
+let _browseSort   = "popular";
+let _browseQuery  = "";
+let _browseOffset = 0;
+let _browseTotal  = 0;
+let _browsing     = false;
+let _browseInLib  = new Set();
+
+/* ── Init ── */
+window.addEventListener("DOMContentLoaded", () => {
+  document.getElementById("browseSearch").addEventListener("keydown", e => {
+    if (e.key === "Enter") browseSearch();
+  });
+  browseLoad(true);
+});
+
+/* ── Helpers ── */
+function browseShowSpinner(v) {
+  document.getElementById("browseSpinner").classList.toggle("hidden", !v);
+}
+function browseShowLoadMore(v) {
+  document.getElementById("browseLoadMore").classList.toggle("hidden", !v);
+}
+
+/* ── Load results ── */
+async function browseLoad(reset) {
+  if (_browsing) return;
+  _browsing = true;
+
+  if (reset) {
+    _browseOffset = 0;
+    document.getElementById("browseGrid").innerHTML = "";
+    document.getElementById("browseLibraryHint").classList.add("hidden");
+  }
+
+  browseShowSpinner(true);
+  browseShowLoadMore(false);
+
+  const q = encodeURIComponent(_browseQuery);
+  const url = `/api/browse/mangadex?q=${q}&sort=${_browseSort}&offset=${_browseOffset}`;
+
+  try {
+    const data = await fetch(url).then(r => r.json());
+    _browseTotal  = data.total || 0;
+    _browseOffset += data.results.length;
+
+    const grid = document.getElementById("browseGrid");
+
+    data.results.forEach(m => {
+      if (m.in_library) _browseInLib.add(m.id);
+      grid.insertAdjacentHTML("beforeend", buildBrowseCard(m));
+    });
+
+    const shown = parseInt(grid.querySelectorAll(".browse-card").length);
+    document.getElementById("browseInfo").textContent =
+      `Showing ${shown} of ${_browseTotal.toLocaleString()} titles`;
+
+    if (_browseInLib.size > 0)
+      document.getElementById("browseLibraryHint").classList.remove("hidden");
+
+    browseShowLoadMore(_browseOffset < _browseTotal && data.results.length > 0);
+  } catch(e) {
+    document.getElementById("browseInfo").textContent = "Failed to load — is the server running?";
+  }
+
+  browseShowSpinner(false);
+  _browsing = false;
+}
+
+/* ── Build a single card ── */
+function buildBrowseCard(m) {
+  const inLib   = m.in_library;
+  const cover   = m.cover_url
+    ? `<img class="bc-cover" src="${m.cover_url}" alt="" loading="lazy"
+            onerror="this.outerHTML='<div class=\\'bc-cover bc-cover-placeholder\\'>&#128366;</div>'" />`
+    : `<div class="bc-cover bc-cover-placeholder">&#128366;</div>`;
+
+  const tags = (m.tags || []).map(t =>
+    `<span class="bc-tag">${escHtml(t)}</span>`).join("");
+
+  const statusCls = {
+    "Ongoing": "status-ongoing", "Completed": "status-completed",
+    "Hiatus": "status-hiatus",   "Cancelled": "status-cancelled",
+  }[m.status] || "";
+
+  const addBtn = inLib
+    ? `<button class="btn-bc-add in-library" id="add-${m.id}" disabled>&#9989; In Library</button>`
+    : `<button class="btn-bc-add" id="add-${m.id}"
+              onclick="browseAddToLibrary('${m.id}','${escHtml(m.title).replace(/'/g,"\\'")}')">
+         &#43; Add to Library
+       </button>`;
+
+  return `
+  <div class="browse-card ${inLib ? "bc-in-library" : ""}" id="bc-${m.id}">
+    <div class="bc-cover-wrap">${cover}</div>
+    <div class="bc-body">
+      <div class="bc-title" title="${escHtml(m.title)}">${escHtml(m.title)}</div>
+      ${m.status ? `<span class="bc-status ${statusCls}">${m.status}</span>` : ""}
+      <div class="bc-tags">${tags}</div>
+      <div class="bc-desc">${escHtml(m.description || "No description available.")}</div>
+      ${addBtn}
+    </div>
+  </div>`;
+}
+
+/* ── Controls ── */
+function browseSearch() {
+  _browseQuery = document.getElementById("browseSearch").value.trim();
+  browseLoad(true);
+}
+function browseClear() {
+  _browseQuery = "";
+  document.getElementById("browseSearch").value = "";
+  browseLoad(true);
+}
+function browseSetSort(btn) {
+  document.querySelectorAll(".sort-btn").forEach(b => b.classList.remove("active"));
+  btn.classList.add("active");
+  _browseSort = btn.dataset.sort;
+  browseLoad(true);
+}
+function browseLoadMore() {
+  browseLoad(false);
+}
+
+/* ── Add to library ── */
+async function browseAddToLibrary(mangaId, title) {
+  const btn = document.getElementById(`add-${mangaId}`);
+  if (btn) { btn.disabled = true; btn.textContent = "Adding..."; }
+
+  try {
+    // Load current config
+    const cfg = await fetch("/api/config").then(r => r.json());
+    if (cfg.manga.some(m => m.id === mangaId)) {
+      showBrowseToast(`Already in library: ${title}`, false);
+      if (btn) { btn.textContent = "✓ In Library"; btn.classList.add("in-library"); }
+      return;
+    }
+    cfg.manga.push({ id: mangaId, name: title });
+    const r = await fetch("/api/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(cfg),
+    }).then(r => r.json());
+
+    if (r.success) {
+      _browseInLib.add(mangaId);
+      if (btn) { btn.textContent = "✓ Added!"; btn.classList.add("in-library"); }
+      document.getElementById(`bc-${mangaId}`)?.classList.add("bc-in-library");
+      document.getElementById("browseLibraryHint").classList.remove("hidden");
+      showBrowseToast(`Added: ${title}`, true);
+    } else {
+      throw new Error(r.message);
+    }
+  } catch(e) {
+    showBrowseToast("Error adding manga: " + e.message, false);
+    if (btn) { btn.disabled = false; btn.textContent = "+ Add to Library"; }
+  }
+}
+
+/* ── Toast ── */
+let _toastTimer = null;
+function showBrowseToast(msg, success) {
+  const el = document.getElementById("browseToast");
+  el.textContent = msg;
+  el.className = `browse-toast ${success ? "toast-success" : "toast-error"}`;
+  if (_toastTimer) clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => el.classList.add("hidden"), 3500);
+}
+</script>
+{% endblock %}

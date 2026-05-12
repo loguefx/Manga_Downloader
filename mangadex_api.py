@@ -176,6 +176,82 @@ def get_cover_url(manga_id: str, quality: str = "512") -> Optional[str]:
     return f"{COVER_CDN}/{manga_id}/{filename}{suffix}"
 
 
+def browse_manga(
+    query: str = "",
+    sort: str = "popular",
+    offset: int = 0,
+    limit: int = 24,
+) -> dict:
+    """
+    Browse / search MangaDex with sorting and pagination.
+
+    sort options: "popular", "latest", "az", "new"
+    Returns {"results": [...], "total": int, "offset": int}
+    """
+    order_map = {
+        "popular": {"order[followedCount]": "desc"},
+        "latest":  {"order[latestUploadedChapter]": "desc"},
+        "az":      {"order[title]": "asc"},
+        "new":     {"order[createdAt]": "desc"},
+    }
+    params = {
+        "limit":  limit,
+        "offset": offset,
+        "includes[]": ["cover_art"],
+        "contentRating[]": ["safe", "suggestive"],
+        **order_map.get(sort, order_map["popular"]),
+    }
+    if query.strip():
+        params["title"] = query.strip()
+
+    try:
+        data = _get("/manga", params=params)
+    except Exception as exc:
+        log.warning("browse_manga failed: %s", exc)
+        return {"results": [], "total": 0, "offset": offset}
+
+    results = []
+    for manga in data.get("data", []):
+        manga_id = manga["id"]
+        title    = get_manga_title(manga)
+        attrs    = manga.get("attributes", {})
+
+        desc_map    = attrs.get("description", {})
+        description = desc_map.get("en", "") or next(iter(desc_map.values()), "")
+        if len(description) > 160:
+            description = description[:157] + "..."
+
+        status = attrs.get("status", "").capitalize()
+        tags   = [
+            t["attributes"]["name"].get("en", "")
+            for t in attrs.get("tags", [])
+            if t["attributes"]["name"].get("en")
+        ][:4]
+
+        cover_url = None
+        for rel in manga.get("relationships", []):
+            if rel["type"] == "cover_art":
+                fname = rel.get("attributes", {}).get("fileName", "")
+                if fname:
+                    cover_url = f"{COVER_CDN}/{manga_id}/{fname}.256.jpg"
+                break
+
+        results.append({
+            "id":          manga_id,
+            "title":       title,
+            "description": description,
+            "status":      status,
+            "tags":        tags,
+            "cover_url":   cover_url,
+        })
+
+    return {
+        "results": results,
+        "total":   data.get("total", len(results)),
+        "offset":  offset,
+    }
+
+
 def search_manga(query: str, limit: int = 12) -> list[dict]:
     """
     Search MangaDex by title and return a list of results with id, title,

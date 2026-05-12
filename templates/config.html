@@ -68,32 +68,20 @@
 
 <!-- MangaDex Manga List -->
 <div class="config-card">
-  <h3 class="config-card-title">MangaDex Manga List</h3>
-  <p class="config-hint" style="margin-bottom:16px">
-    Your existing manga are always preserved. Adding new titles via search or manually
-    adds them to your current list — nothing is ever overwritten.
+  <div class="config-card-header">
+    <h3 class="config-card-title">
+      MangaDex Manga List
+      <span class="manga-count-badge" id="mangaCountLabel">0</span>
+    </h3>
+    <a href="/browse" class="btn btn-primary" style="font-size:12px">
+      &#128269; Browse &amp; Add Manga
+    </a>
+  </div>
+  <p class="config-hint">
+    Use the <a href="/browse" style="color:var(--accent)">Browse page</a> to find and add manga by browsing covers.
+    You can also paste a UUID or MangaDex URL below to add manually.
+    Your existing manga are always preserved — nothing is ever overwritten.
   </p>
-
-  <!-- ── Add New Manga by Search ── -->
-  <div class="search-add-section">
-    <div class="search-add-header">
-      <span class="search-add-icon">&#128269;</span>
-      <span class="search-add-label">Add Manga by Title Search</span>
-      <span class="search-add-sub">Search MangaDex — no UUID needed</span>
-    </div>
-    <div class="manga-search-bar">
-      <input type="text" id="mangaSearchInput"
-             placeholder="Type a manga title and press Search or Enter..."
-             autocomplete="off" />
-      <button class="btn btn-primary" onclick="searchMangaDex()">&#128269; Search</button>
-    </div>
-    <div id="searchResults" class="search-results hidden"></div>
-  </div>
-
-  <!-- ── Current Manga ── -->
-  <div class="section-divider">
-    <span>Your Manga List (<span id="mangaCountLabel">0</span> titles)</span>
-  </div>
 
   <table class="manga-table" id="mangaTable">
     <thead>
@@ -107,7 +95,7 @@
   </table>
 
   <div class="add-manga-row" style="margin-top:12px">
-    <input type="text" id="newMangaId"   placeholder="UUID or MangaDex URL (manual)" />
+    <input type="text" id="newMangaId"   placeholder="UUID or MangaDex URL" />
     <input type="text" id="newMangaName" placeholder="Display name (optional)" />
     <button class="btn btn-secondary" onclick="addMangaRow()">+ Add manually</button>
   </div>

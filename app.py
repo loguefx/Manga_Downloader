@@ -26,7 +26,7 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
-APP_VERSION = "1.2.4"
+APP_VERSION = "1.2.5"
 
 CONFIG_PATH = paths.CONFIG_PATH
 STATE_FILE  = paths.STATE_FILE
@@ -205,6 +205,11 @@ def index():
 @app.route("/config")
 def config_page():
     return render_template("config.html")
+
+
+@app.route("/browse")
+def browse_page():
+    return render_template("browse.html")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -419,6 +424,29 @@ def api_search_mangadex():
         return jsonify(results)
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/browse/mangadex")
+def api_browse_mangadex():
+    """Browse / search MangaDex with sorting and pagination for the Browse page."""
+    query  = request.args.get("q", "").strip()
+    sort   = request.args.get("sort", "popular")
+    try:
+        offset = int(request.args.get("offset", 0))
+    except (ValueError, TypeError):
+        offset = 0
+    try:
+        import mangadex_api as api
+        # Also check which manga are already in config so we can mark them
+        cfg         = _load_config()
+        existing_ids = {m.get("id", "") for m in cfg.get("manga", [])}
+        data        = api.browse_manga(query=query, sort=sort, offset=offset, limit=24)
+        for r in data["results"]:
+            r["in_library"] = r["id"] in existing_ids
+        return jsonify(data)
+    except Exception as exc:
+        log.exception("api_browse_mangadex error: %s", exc)
+        return jsonify({"results": [], "total": 0, "offset": offset})
 
 
 # ──────────────────────────────────────────────────────────────────────────────
