@@ -310,37 +310,24 @@ function searchMangaDex() {
 }
 
 function addFromSearch(mangaId, title) {
-  // Check if already in list
-  const rows = document.querySelectorAll("#mangaTableBody tr");
-  for (const row of rows) {
-    if (row.querySelector("td")?.textContent.trim() === mangaId) {
-      showMsg("Already in your list.", false);
-      return;
-    }
+  const tbody = document.getElementById("mangaTableBody");
+  const list  = tbody._list || [];
+
+  if (list.some(m => m.id === mangaId)) {
+    showMsg("Already in your list.", false);
+    return;
   }
 
-  const tbody = document.getElementById("mangaTableBody");
-  const tr = document.createElement("tr");
-  tr.innerHTML = `
-    <td><input type="text" class="manga-id-input"   value="${mangaId}" readonly /></td>
-    <td><input type="text" class="manga-name-input" value="${title}" /></td>
-    <td><button class="btn-remove" onclick="removeMangaRow(this)">Remove</button></td>`;
-  tbody.appendChild(tr);
+  list.push({ id: mangaId, name: title });
+  renderMangaTable(list);
 
-  // Mark as added in search results
+  // Mark the button as added in the search results panel
   const btn = document.querySelector(`#sr-${mangaId} button`);
-  if (btn) { btn.textContent = "✓ Added"; btn.disabled = true; }
+  if (btn) { btn.textContent = "✓ Added"; btn.disabled = true; btn.style.color = "var(--success)"; }
 
+  showMsg(`Added: ${title}`, true);
   saveConfig(true);
 }
-
-// Allow pressing Enter in the search box
-document.addEventListener("DOMContentLoaded", () => {
-  const inp = document.getElementById("mangaSearchInput");
-  if (inp) {
-    inp.addEventListener("keydown", e => { if (e.key === "Enter") searchMangaDex(); });
-  }
-});
 
 /* ── Config page ────────────────────────────────────────────────────────────── */
 
@@ -349,6 +336,12 @@ let _currentConfig = {};
 async function initConfig() {
   _currentConfig = await fetch("/api/config").then(r => r.json());
   populateForm(_currentConfig);
+
+  // Wire up Enter key for the search input
+  const searchInput = document.getElementById("mangaSearchInput");
+  if (searchInput) {
+    searchInput.addEventListener("keydown", e => { if (e.key === "Enter") searchMangaDex(); });
+  }
 }
 
 function populateForm(cfg) {
