@@ -26,7 +26,7 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
-APP_VERSION = "1.0.9"
+APP_VERSION = "1.1.0"
 
 CONFIG_PATH = paths.CONFIG_PATH
 STATE_FILE  = paths.STATE_FILE
@@ -168,63 +168,121 @@ def api_status():
 # REST API — manga list
 # ──────────────────────────────────────────────────────────────────────────────
 
+def _safe_folder_name(name: str) -> str:
+    """Mirror the logic in downloader._safe_name / generic_site folder naming."""
+    import re as _re
+    return _re.sub(r'[\\/*?:"<>|]', "_", name).strip()
+
+
+def _scan_nas_series(nas_path: str, folder_name: str):
+    """
+    Scan a manga folder on the NAS and return:
+      (cbz_count, newest_mtime_iso, highest_chapter_num)
+
+    Falls back gracefully if the folder doesn't exist.
+    """
+    from datetime import timezone
+    series_dir = Path(nas_path) / folder_name
+    if not series_dir.exists():
+        return 0, None, None
+
+    cbz_files = list(series_dir.glob("*.cbz"))
+    if not cbz_files:
+        return 0, None, None
+
+    # Most recent file modification time
+    newest_mtime = max(f.stat().st_mtime for f in cbz_files)
+    newest_iso = datetime.fromtimestamp(newest_mtime, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    # Highest chapter number extracted from filenames
+    import re as _re
+    _num_re = _re.compile(r"(\d+(?:\.\d+)?)")
+    highest = None
+    for f in cbz_files:
+        m = _num_re.search(f.stem)
+        if m:
+            n = float(m.group(1))
+            if highest is None or n > highest:
+                highest = n
+
+    return len(cbz_files), newest_iso, highest
+
+
 @app.route("/api/manga")
 def api_manga():
-    cfg = _load_config()
+    import re as _re
+    cfg   = _load_config()
     state = _load_state()
+    nas_path = cfg.get("nas_path", "")
     result = []
 
-    # MangaDex entries
+    # ── MangaDex entries ──────────────────────────────────────────────────────
     for entry in cfg.get("manga", []):
         manga_id = entry.get("id", "").strip()
         if not manga_id:
             continue
-        manga_state = state.get(manga_id, {})
-        chapters_map: dict = manga_state.get("chapters", {})
+        manga_state   = state.get(manga_id, {})
+        chapters_map  = manga_state.get("chapters", {})
+        series_name   = entry.get("name") or manga_state.get("title") or manga_id
+        folder_name   = _safe_folder_name(series_name)
 
+        # Real counts from the NAS take priority over state.json
+        nas_count, nas_newest, nas_highest = _scan_nas_series(nas_path, folder_name)
+
+        # Build chapter list: merge state.json records with NAS reality
         chapter_list = sorted(
-            [
-                {
-                    "number": float(k),
-                    "downloaded_at": v.get("downloaded_at", ""),
-                }
-                for k, v in chapters_map.items()
-            ],
+            [{"number": float(k), "downloaded_at": v.get("downloaded_at", "")}
+             for k, v in chapters_map.items()],
             key=lambda x: x["number"],
             reverse=True,
         )
 
+        # Sort key: most recently downloaded first (use NAS mtime if state is empty)
+        last_dl = chapter_list[0]["downloaded_at"] if chapter_list else (nas_newest or "")
+
         result.append({
-            "id": manga_id,
-            "name": entry.get("name") or manga_state.get("title") or manga_id,
-            "source": "MangaDex",
-            "total_chapters": len(chapters_map),
-            "latest_chapter": manga_state.get("last_chapter"),
-            "chapters": chapter_list,
+            "id":              manga_id,
+            "name":            series_name,
+            "source":          "MangaDex",
+            "total_chapters":  nas_count if nas_count > 0 else len(chapters_map),
+            "latest_chapter":  manga_state.get("last_chapter") or nas_highest,
+            "chapters":        chapter_list,
+            "_sort_key":       last_dl,
         })
 
-    # Third-party site entries
-    import re as _re
+    # ── Third-party site entries ──────────────────────────────────────────────
     for site in cfg.get("third_party_sites", []):
         if not site.get("enabled", False):
             continue
-        site_name = site.get("name", "Unknown")
-        state_key = f"_site_{_re.sub(r'[^a-z0-9]', '_', site_name.lower())}"
-        site_state = state.get(state_key, {})
+        site_name   = site.get("name", "Unknown")
+        nas_folder  = site.get("nas_folder") or site_name
+        state_key   = f"_site_{_re.sub(r'[^a-z0-9]', '_', site_name.lower())}"
+        site_state  = state.get(state_key, {})
         chapters_map = site_state.get("chapters", {})
+
+        nas_count, nas_newest, nas_highest = _scan_nas_series(nas_path, _safe_folder_name(nas_folder))
+
         chapter_list = sorted(
             [{"number": float(k), "downloaded_at": v.get("downloaded_at", "")}
              for k, v in chapters_map.items()],
-            key=lambda x: x["number"], reverse=True,
+            key=lambda x: x["number"],
+            reverse=True,
         )
+
+        last_dl = chapter_list[0]["downloaded_at"] if chapter_list else (nas_newest or "")
+
         result.append({
-            "id": state_key,
-            "name": site_name,
-            "source": "3rd Party",
-            "total_chapters": len(chapters_map),
-            "latest_chapter": site_state.get("last_chapter"),
-            "chapters": chapter_list,
+            "id":             state_key,
+            "name":           site_name,
+            "source":         "3rd Party",
+            "total_chapters": nas_count if nas_count > 0 else len(chapters_map),
+            "latest_chapter": site_state.get("last_chapter") or nas_highest,
+            "chapters":       chapter_list,
+            "_sort_key":      last_dl,
         })
+
+    # ── Sort by most recently downloaded (newest first) ───────────────────────
+    result.sort(key=lambda x: x.pop("_sort_key") or "", reverse=True)
 
     return jsonify(result)
 

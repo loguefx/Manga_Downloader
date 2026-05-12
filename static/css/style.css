@@ -204,6 +204,7 @@ small { color: var(--text-secondary); font-size: 11px; }
 .manga-stats { display: flex; flex-direction: column; gap: 4px; }
 .stat-row { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-secondary); }
 .stat-value { color: var(--text-primary); font-weight: 600; }
+.stat-value.stat-positive { color: var(--success); }
 
 /* ── Chapter list toggle ───────────────────────────────────────────────────── */
 .manga-card-footer {

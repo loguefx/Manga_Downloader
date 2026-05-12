@@ -139,18 +139,26 @@ async function loadManga() {
 function buildMangaCard(m) {
   const coverUrl   = `/api/cover/${encodeURIComponent(m.name)}`;
   const latestChap = m.latest_chapter != null ? `Ch. ${m.latest_chapter}` : "—";
+
+  // Most recently downloaded chapter (chapters already sorted desc by number)
   const recentChap = m.chapters.length ? m.chapters[0] : null;
-  const recentStr  = recentChap
-    ? `Ch. ${recentChap.number} &mdash; ${formatDate(recentChap.downloaded_at)}`
-    : "None yet";
+  let recentStr;
+  if (recentChap && recentChap.downloaded_at) {
+    recentStr = `Ch. ${recentChap.number} &mdash; ${formatDate(recentChap.downloaded_at)}`;
+  } else if (recentChap) {
+    recentStr = `Ch. ${recentChap.number}`;
+  } else {
+    recentStr = "—";
+  }
 
   const chapRows = m.chapters.slice(0, 200).map(c => `
     <div class="chapter-row">
-      <span class="chapter-num">Chapter ${c.number}</span>
-      <span class="chapter-date">${formatDate(c.downloaded_at)}</span>
+      <span class="chapter-num">Ch. ${c.number}</span>
+      <span class="chapter-date">${c.downloaded_at ? formatDate(c.downloaded_at) : "—"}</span>
     </div>`).join("");
 
-  const cardId = `card-${m.id.replace(/[^a-z0-9]/gi, "_")}`;
+  const srcClass = m.source === 'MangaDex' ? 'mangadex' : m.source === 'Web Scraper' ? 'scraper' : 'third';
+  const cardId   = `card-${m.id.replace(/[^a-z0-9]/gi, "_")}`;
 
   return `
     <div class="manga-card" id="${cardId}">
@@ -160,12 +168,12 @@ function buildMangaCard(m) {
              alt="cover"
              onerror="this.outerHTML='<div class=\\'manga-cover-placeholder\\'>&#128366;</div>'" />
         <div class="manga-meta">
-          <div class="manga-title" title="${m.name}">${m.name}</div>
-          <div class="manga-source-badge ${m.source === 'MangaDex' ? 'mangadex' : m.source === 'Web Scraper' ? 'scraper' : 'third'}">${m.source}</div>
+          <div class="manga-title" title="${escHtml(m.name)}">${escHtml(m.name)}</div>
+          <div class="manga-source-badge ${srcClass}">${m.source}</div>
           <div class="manga-stats">
             <div class="stat-row">
               <span>Chapters on NAS</span>
-              <span class="stat-value">${m.total_chapters}</span>
+              <span class="stat-value ${m.total_chapters > 0 ? 'stat-positive' : ''}">${m.total_chapters}</span>
             </div>
             <div class="stat-row">
               <span>Latest chapter</span>
@@ -184,7 +192,7 @@ function buildMangaCard(m) {
           <span class="toggle-arrow" id="arrow-${cardId}">&#9660;</span>
         </button>
         <div class="chapters-list" id="chaplist-${cardId}">
-          ${chapRows || '<div class="chapter-row"><span class="chapter-date">No chapters recorded yet.</span></div>'}
+          ${chapRows || '<div class="chapter-row"><span class="chapter-date" style="color:var(--text-muted)">No history recorded — chapters may exist on NAS from before tracking started.</span></div>'}
         </div>
       </div>
     </div>`;
