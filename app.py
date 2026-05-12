@@ -598,7 +598,15 @@ def _auto_service_start() -> None:
 if __name__ == "__main__":
     _SVC_COMMANDS = {"install", "remove", "start", "stop", "restart", "debug", "update"}
 
-    if len(sys.argv) > 1 and sys.argv[1].lower() in _SVC_COMMANDS:
+    if len(sys.argv) > 1 and sys.argv[1].lower() == "--dev":
+        # Direct / development run — skip service machinery entirely
+        _setup_logging(console=True)
+        cfg  = _load_config()
+        port = cfg.get("web_port", 8080)
+        log.info("Dev mode: starting scheduler + Flask on port %s", port)
+        start_scheduler()
+        run_flask(host="0.0.0.0", port=port)
+    elif len(sys.argv) > 1 and sys.argv[1].lower() in _SVC_COMMANDS:
         # Explicit service management command (install / remove / stop / etc.)
         try:
             import win32serviceutil
