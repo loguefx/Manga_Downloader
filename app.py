@@ -26,7 +26,7 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
-APP_VERSION = "1.2.2"
+APP_VERSION = "1.2.3"
 
 CONFIG_PATH = paths.CONFIG_PATH
 STATE_FILE  = paths.STATE_FILE
@@ -238,112 +238,124 @@ def _scan_nas_series(nas_path: str, folder_name: str):
     Scan a manga folder on the NAS and return:
       (cbz_count, newest_mtime_iso, highest_chapter_num)
 
-    Falls back gracefully if the folder doesn't exist.
+    Falls back gracefully if the folder doesn't exist or is unreachable.
     """
-    from datetime import timezone
-    series_dir = Path(nas_path) / folder_name
-    if not series_dir.exists():
+    try:
+        from datetime import timezone
+        import re as _re
+        series_dir = Path(nas_path) / folder_name
+        if not series_dir.exists():
+            return 0, None, None
+
+        cbz_files = list(series_dir.glob("*.cbz"))
+        if not cbz_files:
+            return 0, None, None
+
+        # Most recent file modification time
+        newest_mtime = max(f.stat().st_mtime for f in cbz_files)
+        newest_iso = datetime.fromtimestamp(newest_mtime, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        # Highest chapter number — match "Chapter 019.500" style filenames
+        # by looking for the last number group preceded by "Chapter "
+        _chap_re = _re.compile(r"[Cc]hapter\s+(\d+(?:\.\d+)?)", _re.IGNORECASE)
+        _any_re  = _re.compile(r"(\d+(?:\.\d+)?)")
+        highest = None
+        for f in cbz_files:
+            stem = f.stem
+            m = _chap_re.search(stem) or _any_re.search(stem)
+            if m:
+                try:
+                    n = float(m.group(1))
+                    if highest is None or n > highest:
+                        highest = n
+                except (ValueError, OverflowError):
+                    pass
+
+        return len(cbz_files), newest_iso, highest
+    except Exception:
         return 0, None, None
-
-    cbz_files = list(series_dir.glob("*.cbz"))
-    if not cbz_files:
-        return 0, None, None
-
-    # Most recent file modification time
-    newest_mtime = max(f.stat().st_mtime for f in cbz_files)
-    newest_iso = datetime.fromtimestamp(newest_mtime, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-    # Highest chapter number extracted from filenames
-    import re as _re
-    _num_re = _re.compile(r"(\d+(?:\.\d+)?)")
-    highest = None
-    for f in cbz_files:
-        m = _num_re.search(f.stem)
-        if m:
-            n = float(m.group(1))
-            if highest is None or n > highest:
-                highest = n
-
-    return len(cbz_files), newest_iso, highest
 
 
 @app.route("/api/manga")
 def api_manga():
     import re as _re
-    cfg   = _load_config()
-    state = _load_state()
-    nas_path = cfg.get("nas_path", "")
-    result = []
+    try:
+        cfg   = _load_config()
+        state = _load_state()
+        nas_path = cfg.get("nas_path", "")
+        result = []
 
-    # ── MangaDex entries ──────────────────────────────────────────────────────
-    for entry in cfg.get("manga", []):
-        manga_id = entry.get("id", "").strip()
-        if not manga_id:
-            continue
-        manga_state   = state.get(manga_id, {})
-        chapters_map  = manga_state.get("chapters", {})
-        series_name   = entry.get("name") or manga_state.get("title") or manga_id
-        folder_name   = _safe_folder_name(series_name)
+        def _safe_chapters(chapters_map):
+            """Convert a chapters dict to a list, tolerating old string-value formats."""
+            rows = []
+            if not isinstance(chapters_map, dict):
+                return rows
+            for k, v in chapters_map.items():
+                try:
+                    num = float(k)
+                except (ValueError, TypeError):
+                    continue
+                dl_at = v.get("downloaded_at", "") if isinstance(v, dict) else ""
+                rows.append({"number": num, "downloaded_at": dl_at})
+            return sorted(rows, key=lambda x: x["number"], reverse=True)
 
-        # Real counts from the NAS take priority over state.json
-        nas_count, nas_newest, nas_highest = _scan_nas_series(nas_path, folder_name)
+        # ── MangaDex entries ──────────────────────────────────────────────────
+        for entry in cfg.get("manga", []):
+            manga_id = entry.get("id", "").strip()
+            if not manga_id:
+                continue
+            manga_state  = state.get(manga_id, {}) if isinstance(state.get(manga_id), dict) else {}
+            chapters_map = manga_state.get("chapters", {})
+            series_name  = entry.get("name") or manga_state.get("title") or manga_id
+            folder_name  = _safe_folder_name(series_name)
 
-        # Build chapter list: merge state.json records with NAS reality
-        chapter_list = sorted(
-            [{"number": float(k), "downloaded_at": v.get("downloaded_at", "")}
-             for k, v in chapters_map.items()],
-            key=lambda x: x["number"],
-            reverse=True,
-        )
+            nas_count, nas_newest, nas_highest = _scan_nas_series(nas_path, folder_name)
 
-        # Sort key: most recently downloaded first (use NAS mtime if state is empty)
-        last_dl = chapter_list[0]["downloaded_at"] if chapter_list else (nas_newest or "")
+            chapter_list = _safe_chapters(chapters_map)
+            last_dl = chapter_list[0]["downloaded_at"] if chapter_list else (nas_newest or "")
 
-        result.append({
-            "id":              manga_id,
-            "name":            series_name,
-            "source":          "MangaDex",
-            "total_chapters":  nas_count if nas_count > 0 else len(chapters_map),
-            "latest_chapter":  manga_state.get("last_chapter") or nas_highest,
-            "chapters":        chapter_list,
-            "_sort_key":       last_dl,
-        })
+            result.append({
+                "id":              manga_id,
+                "name":            series_name,
+                "source":          "MangaDex",
+                "total_chapters":  nas_count if nas_count > 0 else len(chapter_list),
+                "latest_chapter":  manga_state.get("last_chapter") or nas_highest,
+                "chapters":        chapter_list,
+                "_sort_key":       last_dl,
+            })
 
-    # ── Third-party site entries ──────────────────────────────────────────────
-    for site in cfg.get("third_party_sites", []):
-        if not site.get("enabled", False):
-            continue
-        site_name   = site.get("name", "Unknown")
-        nas_folder  = site.get("nas_folder") or site_name
-        state_key   = f"_site_{_re.sub(r'[^a-z0-9]', '_', site_name.lower())}"
-        site_state  = state.get(state_key, {})
-        chapters_map = site_state.get("chapters", {})
+        # ── Third-party site entries ──────────────────────────────────────────
+        for site in cfg.get("third_party_sites", []):
+            if not site.get("enabled", False):
+                continue
+            site_name   = site.get("name", "Unknown")
+            nas_folder  = site.get("nas_folder") or site_name
+            state_key   = f"_site_{_re.sub(r'[^a-z0-9]', '_', site_name.lower())}"
+            site_state  = state.get(state_key, {}) if isinstance(state.get(state_key), dict) else {}
+            chapters_map = site_state.get("chapters", {})
 
-        nas_count, nas_newest, nas_highest = _scan_nas_series(nas_path, _safe_folder_name(nas_folder))
+            nas_count, nas_newest, nas_highest = _scan_nas_series(nas_path, _safe_folder_name(nas_folder))
 
-        chapter_list = sorted(
-            [{"number": float(k), "downloaded_at": v.get("downloaded_at", "")}
-             for k, v in chapters_map.items()],
-            key=lambda x: x["number"],
-            reverse=True,
-        )
+            chapter_list = _safe_chapters(chapters_map)
+            last_dl = chapter_list[0]["downloaded_at"] if chapter_list else (nas_newest or "")
 
-        last_dl = chapter_list[0]["downloaded_at"] if chapter_list else (nas_newest or "")
+            result.append({
+                "id":             state_key,
+                "name":           site_name,
+                "source":         "3rd Party",
+                "total_chapters": nas_count if nas_count > 0 else len(chapter_list),
+                "latest_chapter": site_state.get("last_chapter") or nas_highest,
+                "chapters":       chapter_list,
+                "_sort_key":      last_dl,
+            })
 
-        result.append({
-            "id":             state_key,
-            "name":           site_name,
-            "source":         "3rd Party",
-            "total_chapters": nas_count if nas_count > 0 else len(chapters_map),
-            "latest_chapter": site_state.get("last_chapter") or nas_highest,
-            "chapters":       chapter_list,
-            "_sort_key":      last_dl,
-        })
+        # ── Sort by most recently downloaded (newest first) ───────────────────
+        result.sort(key=lambda x: x.pop("_sort_key") or "", reverse=True)
+        return jsonify(result)
 
-    # ── Sort by most recently downloaded (newest first) ───────────────────────
-    result.sort(key=lambda x: x.pop("_sort_key") or "", reverse=True)
-
-    return jsonify(result)
+    except Exception as exc:
+        log.exception("api_manga error: %s", exc)
+        return jsonify([]), 200   # always return valid JSON so the UI doesn't crash
 
 
 # ──────────────────────────────────────────────────────────────────────────────
