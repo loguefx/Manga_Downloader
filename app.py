@@ -26,7 +26,7 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
-APP_VERSION = "1.0.8"
+APP_VERSION = "1.0.9"
 
 CONFIG_PATH = paths.CONFIG_PATH
 STATE_FILE  = paths.STATE_FILE
@@ -393,6 +393,29 @@ def _auto_service_start() -> None:
         except Exception as exc:
             log.error("Service install failed: %s", exc)
             sys.exit(1)
+
+        # ── Open firewall port so the dashboard is reachable on the LAN ──────
+        cfg = _load_config()
+        port = int(cfg.get("web_port", 8080))
+        try:
+            subprocess.run(
+                [
+                    "netsh", "advfirewall", "firewall", "add", "rule",
+                    f"name=MangaDownloader-{port}",
+                    "dir=in",
+                    "action=allow",
+                    "protocol=TCP",
+                    f"localport={port}",
+                    "profile=private,domain",
+                ],
+                timeout=15,
+                check=True,
+            )
+            log.info("Firewall rule added — port %d open on private network.", port)
+        except Exception as exc:
+            log.warning("Could not add firewall rule automatically: %s", exc)
+            log.warning("If the dashboard is unreachable from other devices, run this manually as Admin:")
+            log.warning("  netsh advfirewall firewall add rule name=MangaDownloader dir=in action=allow protocol=TCP localport=%d", port)
 
     # ── Start the service ─────────────────────────────────────────────────────
     try:
