@@ -233,6 +233,24 @@ async function triggerScan() {
   } catch (e) { alert("Could not contact server: " + e.message); }
 }
 
+async function triggerKomgaScan() {
+  const btn    = document.getElementById("komgaScanBtn");
+  const status = document.getElementById("komgaScanStatus");
+  if (btn) { btn.disabled = true; btn.textContent = "Scanning..."; }
+  if (status) status.textContent = "";
+  try {
+    const r = await fetch("/api/komga/scan", { method: "POST" }).then(r => r.json());
+    if (status) {
+      status.textContent = r.success ? "✓ Scan triggered successfully!" : "✗ " + r.message;
+      status.style.color = r.success ? "var(--success)" : "var(--accent)";
+    }
+  } catch(e) {
+    if (status) { status.textContent = "✗ Request failed"; status.style.color = "var(--accent)"; }
+  }
+  if (btn) { btn.disabled = false; btn.textContent = "↻ Scan Komga Now"; }
+  setTimeout(() => { if (status) status.textContent = ""; }, 5000);
+}
+
 async function downloadSingle(mangaId, source, cardId) {
   const btn = document.getElementById(`dl-${cardId}`);
   if (btn) { btn.disabled = true; btn.textContent = "⏳ Downloading..."; }
@@ -358,6 +376,7 @@ function populateForm(cfg) {
   setValue("komga_url",             cfg.komga_url ?? "");
   setValue("komga_username",        cfg.komga_username ?? "");
   setValue("komga_password",        cfg.komga_password ?? "");
+  setValue("komga_library_id",      cfg.komga_library_id ?? "");
 
   renderMangaTable(cfg.manga ?? []);
   renderSitesTable(cfg.third_party_sites ?? []);
@@ -429,6 +448,7 @@ async function saveConfig(silent = false) {
     komga_url:             (document.getElementById("komga_url")?.value ?? "").trim(),
     komga_username:        (document.getElementById("komga_username")?.value ?? "").trim(),
     komga_password:        (document.getElementById("komga_password")?.value ?? "").trim(),
+    komga_library_id:      (document.getElementById("komga_library_id")?.value ?? "").trim(),
     manga: (tbody._list || []),
     third_party_sites: (sitesTbody._list || []),
     scrapers: {}

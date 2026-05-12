@@ -103,6 +103,8 @@ manga:
   name: Anjo the Mischievous Gal
 - id: f678b24d-f1fd-4717-8824-4138845390eb
   name: When I Repaired a Gal's Bicycle, She Became Attached to Me
+- id: 77bee52c-d2d6-44ad-a33a-1734c1fe696a
+  name: The Eminence in Shadow
 max_chapters_per_run: 0
 nas_path: //192.168.0.181/Jellyfin6/Manga
 page_delay_seconds: 0.5

@@ -183,25 +183,51 @@ def _send_discord_notification(cfg: dict, state: dict) -> None:
 
 
 def _trigger_komga_scan(cfg: dict, _status=None) -> None:
-    """Trigger a Komga library rescan via the Komga REST API."""
+    """Trigger a Komga library rescan via the Komga REST API.
+
+    Komga requires a library ID in the URL.  We first fetch all libraries the
+    configured user can see, then POST /scan on each one.  If the user has
+    configured a specific komga_library_id we only scan that one.
+    """
     komga_url  = cfg.get("komga_url", "").strip().rstrip("/")
     komga_user = cfg.get("komga_username", "").strip()
     komga_pass = cfg.get("komga_password", "").strip()
+    specific_id = cfg.get("komga_library_id", "").strip()
 
     if not komga_url:
         return
 
+    auth = (komga_user, komga_pass) if komga_user else None
+    headers = {"Accept": "application/json"}
+
     try:
-        resp = requests.post(
-            f"{komga_url}/api/v1/libraries/scan",
-            auth=(komga_user, komga_pass) if komga_user else None,
-            timeout=15,
-        )
-        if resp.status_code in (200, 202, 204):
-            log.info("Komga library scan triggered.")
-            if _status:
-                _status("Komga library scan triggered.", "info")
+        if specific_id:
+            library_ids = [specific_id]
         else:
-            log.warning("Komga scan returned %d: %s", resp.status_code, resp.text[:200])
+            # Fetch all library IDs
+            r = requests.get(
+                f"{komga_url}/api/v1/libraries",
+                auth=auth, headers=headers, timeout=15,
+            )
+            r.raise_for_status()
+            library_ids = [lib["id"] for lib in r.json().get("content", r.json() if isinstance(r.json(), list) else [])]
+
+        if not library_ids:
+            log.warning("Komga: no libraries found to scan.")
+            return
+
+        for lib_id in library_ids:
+            resp = requests.post(
+                f"{komga_url}/api/v1/libraries/{lib_id}/scan",
+                auth=auth, headers=headers, timeout=15,
+            )
+            if resp.status_code in (200, 202, 204):
+                log.info("Komga library %s scan triggered.", lib_id)
+            else:
+                log.warning("Komga scan library %s returned %d: %s", lib_id, resp.status_code, resp.text[:200])
+
+        if _status:
+            _status(f"Komga library scan triggered ({len(library_ids)} lib(s)).", "info")
+
     except Exception as exc:
         log.warning("Could not trigger Komga scan: %s", exc)

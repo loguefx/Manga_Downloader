@@ -426,6 +426,19 @@ def api_search_mangadex():
         return jsonify({"error": str(exc)}), 500
 
 
+@app.route("/api/komga/scan", methods=["POST"])
+def api_komga_scan():
+    """Manually trigger a Komga library rescan."""
+    try:
+        from scheduler import _trigger_komga_scan
+        cfg = _load_config()
+        _trigger_komga_scan(cfg)
+        return jsonify({"success": True, "message": "Komga scan triggered."})
+    except Exception as exc:
+        log.exception("api_komga_scan error: %s", exc)
+        return jsonify({"success": False, "message": str(exc)}), 500
+
+
 @app.route("/api/browse/mangadex")
 def api_browse_mangadex():
     """Browse / search MangaDex with sorting and pagination for the Browse page."""
