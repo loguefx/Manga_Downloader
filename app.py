@@ -150,11 +150,12 @@ def _run_single_scan_thread(item_id: str, source: str) -> None:
             chapter_delay = float(cfg.get("chapter_delay_seconds", 2))
             max_chapters  = int(cfg.get("max_chapters_per_run", 0))
 
+            chapters_downloaded = 0
             if source == "MangaDex":
                 entry = next(
                     (e for e in cfg.get("manga", []) if e.get("id") == item_id), {}
                 )
-                downloader.download_manga(
+                chapters_downloaded = downloader.download_manga(
                     manga_id=item_id,
                     config_name=entry.get("name"),
                     nas_path=nas_path,
@@ -175,7 +176,7 @@ def _run_single_scan_thread(item_id: str, source: str) -> None:
                 )
                 if site_cfg:
                     from scrapers import generic_site
-                    generic_site.download_new_chapters(
+                    chapters_downloaded = generic_site.download_new_chapters(
                         site_cfg=site_cfg,
                         nas_path=nas_path,
                         page_delay=page_delay,
@@ -183,6 +184,15 @@ def _run_single_scan_thread(item_id: str, source: str) -> None:
                         state=state,
                         status_callback=cb,
                     )
+
+            # ── Post-download: trigger Komga rescan ───────────────────────────
+            if chapters_downloaded and chapters_downloaded > 0:
+                cb(f"Triggering Komga rescan after {chapters_downloaded} new chapter(s)...", "info")
+                from scheduler import _trigger_komga_scan
+                _trigger_komga_scan(cfg, cb)
+            else:
+                cb("No new chapters found — Komga scan skipped.", "info")
+
         finally:
             _scanning = False
 

@@ -177,39 +177,76 @@ function browseLoadMore() {
   browseLoad(false);
 }
 
-/* ── Add to library ── */
+/* ── Add to library + auto-download + Komga rescan ── */
 async function browseAddToLibrary(mangaId, title) {
-  const btn = document.getElementById(`add-${mangaId}`);
-  if (btn) { btn.disabled = true; btn.textContent = "Adding..."; }
+  const btn  = document.getElementById(`add-${mangaId}`);
+  const card = document.getElementById(`bc-${mangaId}`);
+  if (btn) { btn.disabled = true; btn.textContent = "Saving..."; }
 
   try {
-    // Load current config
+    // 1. Check already in library
     const cfg = await fetch("/api/config").then(r => r.json());
     if (cfg.manga.some(m => m.id === mangaId)) {
       showBrowseToast(`Already in library: ${title}`, false);
       if (btn) { btn.textContent = "✓ In Library"; btn.classList.add("in-library"); }
       return;
     }
+
+    // 2. Save to config
     cfg.manga.push({ id: mangaId, name: title });
-    const r = await fetch("/api/config", {
+    const saveRes = await fetch("/api/config", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(cfg),
     }).then(r => r.json());
+    if (!saveRes.success) throw new Error(saveRes.message);
 
-    if (r.success) {
-      _browseInLib.add(mangaId);
-      if (btn) { btn.textContent = "✓ Added!"; btn.classList.add("in-library"); }
-      document.getElementById(`bc-${mangaId}`)?.classList.add("bc-in-library");
-      document.getElementById("browseLibraryHint").classList.remove("hidden");
-      showBrowseToast(`Added: ${title}`, true);
+    _browseInLib.add(mangaId);
+    card?.classList.add("bc-in-library");
+    document.getElementById("browseLibraryHint").classList.remove("hidden");
+
+    // 3. Kick off download scan for this manga
+    if (btn) { btn.textContent = "⬇ Downloading..."; }
+    showBrowseToast(`Added "${title}" — starting download...`, true);
+
+    const scanRes = await fetch("/api/scan/single", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: mangaId, source: "MangaDex" }),
+    }).then(r => r.json());
+
+    if (scanRes.success) {
+      if (btn) { btn.textContent = "⏳ Downloading..."; btn.classList.add("in-library"); }
+      showBrowseToast(`"${title}" is downloading — Komga will update when done!`, true);
+      // Poll until the scan finishes, then update button
+      pollUntilDone(mangaId, title, btn);
     } else {
-      throw new Error(r.message);
+      // Scan busy (another scan running) — still saved, just not downloading yet
+      if (btn) { btn.textContent = "✓ Saved (scan later)"; btn.classList.add("in-library"); }
+      showBrowseToast(`Saved "${title}". Another scan is running — it will download on the next cycle.`, false);
     }
   } catch(e) {
-    showBrowseToast("Error adding manga: " + e.message, false);
+    showBrowseToast("Error: " + e.message, false);
     if (btn) { btn.disabled = false; btn.textContent = "+ Add to Library"; }
   }
+}
+
+/* ── Poll until active scan finishes ── */
+async function pollUntilDone(mangaId, title, btn) {
+  const start = Date.now();
+  const maxWait = 30 * 60 * 1000; // 30 min max poll
+  while (Date.now() - start < maxWait) {
+    await new Promise(r => setTimeout(r, 5000));
+    try {
+      const s = await fetch("/api/status").then(r => r.json());
+      if (!s.scanning) {
+        if (btn) { btn.textContent = "✓ Done"; }
+        showBrowseToast(`"${title}" downloaded & Komga updated!`, true);
+        return;
+      }
+    } catch(_) { /* ignore transient errors */ }
+  }
+  if (btn) { btn.textContent = "✓ In Library"; }
 }
 
 /* ── Toast ── */
