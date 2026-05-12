@@ -8,6 +8,7 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import requests
 import yaml
 
 import downloader
@@ -115,4 +116,92 @@ def run_download_cycle(status_callback=None) -> int:
             log.exception("Third-party scraper error for %s: %s", site_name, exc)
 
     _status(f"Scan complete — {total_downloaded} new chapter(s) downloaded total.", "done")
+
+    # ── Post-scan integrations ────────────────────────────────────────────────
+    if total_downloaded > 0:
+        _send_discord_notification(cfg, state)
+        _trigger_komga_scan(cfg, _status)
+
     return total_downloaded
+
+
+# ── Integration helpers ───────────────────────────────────────────────────────
+
+def _send_discord_notification(cfg: dict, state: dict) -> None:
+    """Post a Discord embed listing every newly downloaded chapter."""
+    webhook_url = cfg.get("discord_webhook_url", "").strip()
+    if not webhook_url:
+        return
+
+    # Collect chapter download records from state, grouped by manga name
+    lines = []
+    for key, val in state.items():
+        if key.startswith("_"):
+            continue
+        if not isinstance(val, dict):
+            continue
+        title = val.get("title") or key
+        chapters_map = val.get("chapters", {})
+        if not chapters_map:
+            continue
+        # Only include chapters downloaded in the last hour
+        recent = []
+        cutoff = (datetime.now() - timedelta(hours=1)).isoformat()
+        for chap_num, chap_data in chapters_map.items():
+            if isinstance(chap_data, dict) and chap_data.get("downloaded_at", "") >= cutoff:
+                recent.append(float(chap_num))
+        if recent:
+            recent.sort()
+            chap_str = ", ".join(
+                str(int(c) if c == int(c) else c) for c in recent
+            )
+            lines.append({"name": title, "value": f"Ch. {chap_str}", "inline": True})
+
+    if not lines:
+        return
+
+    total = sum(1 for f in lines for _ in [f])
+    payload = {
+        "embeds": [{
+            "title": "Manga Downloader — New Chapters Ready",
+            "color": 0xe53935,
+            "fields": lines[:25],
+            "footer": {
+                "text": f"{len(lines)} series updated • {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+            },
+        }]
+    }
+
+    try:
+        resp = requests.post(webhook_url, json=payload, timeout=10)
+        if resp.status_code in (200, 204):
+            log.info("Discord notification sent.")
+        else:
+            log.warning("Discord webhook returned %d: %s", resp.status_code, resp.text[:200])
+    except Exception as exc:
+        log.warning("Could not send Discord notification: %s", exc)
+
+
+def _trigger_komga_scan(cfg: dict, _status=None) -> None:
+    """Trigger a Komga library rescan via the Komga REST API."""
+    komga_url  = cfg.get("komga_url", "").strip().rstrip("/")
+    komga_user = cfg.get("komga_username", "").strip()
+    komga_pass = cfg.get("komga_password", "").strip()
+
+    if not komga_url:
+        return
+
+    try:
+        resp = requests.post(
+            f"{komga_url}/api/v1/libraries/scan",
+            auth=(komga_user, komga_pass) if komga_user else None,
+            timeout=15,
+        )
+        if resp.status_code in (200, 202, 204):
+            log.info("Komga library scan triggered.")
+            if _status:
+                _status("Komga library scan triggered.", "info")
+        else:
+            log.warning("Komga scan returned %d: %s", resp.status_code, resp.text[:200])
+    except Exception as exc:
+        log.warning("Could not trigger Komga scan: %s", exc)

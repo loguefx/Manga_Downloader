@@ -176,6 +176,55 @@ def get_cover_url(manga_id: str, quality: str = "512") -> Optional[str]:
     return f"{COVER_CDN}/{manga_id}/{filename}{suffix}"
 
 
+def search_manga(query: str, limit: int = 12) -> list[dict]:
+    """
+    Search MangaDex by title and return a list of results with id, title,
+    description, and a thumbnail cover URL.
+    """
+    params = {
+        "title": query,
+        "limit": limit,
+        "includes[]": ["cover_art"],
+        "contentRating[]": ["safe", "suggestive", "erotica", "pornographic"],
+        "order[relevance]": "desc",
+    }
+    try:
+        data = _get("/manga", params=params)
+    except Exception as exc:
+        log.warning("Search failed for %r: %s", query, exc)
+        return []
+
+    results = []
+    for manga in data.get("data", []):
+        manga_id = manga["id"]
+        title    = get_manga_title(manga)
+        attrs    = manga.get("attributes", {})
+
+        # Description (English preferred)
+        desc_map = attrs.get("description", {})
+        description = desc_map.get("en", "") or next(iter(desc_map.values()), "")
+        if len(description) > 200:
+            description = description[:197] + "..."
+
+        # Thumbnail from embedded cover_art relationship
+        cover_url = None
+        for rel in manga.get("relationships", []):
+            if rel["type"] == "cover_art":
+                fname = rel.get("attributes", {}).get("fileName", "")
+                if fname:
+                    cover_url = f"{COVER_CDN}/{manga_id}/{fname}.256.jpg"
+                break
+
+        results.append({
+            "id":          manga_id,
+            "title":       title,
+            "description": description,
+            "cover_url":   cover_url,
+        })
+
+    return results
+
+
 def download_image(url: str, retries: int = 3) -> bytes:
     """Download a single image and return its raw bytes."""
     for attempt in range(1, retries + 1):

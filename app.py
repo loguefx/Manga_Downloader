@@ -26,7 +26,7 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.0"
 
 CONFIG_PATH = paths.CONFIG_PATH
 STATE_FILE  = paths.STATE_FILE
@@ -113,17 +113,76 @@ def _run_scan_thread() -> None:
         _scanning = True
         _scan_log = []
         try:
-            def _log_cb(msg: str, level: str = "info"):
-                from datetime import datetime as _dt
-                entry = {
-                    "msg": msg,
-                    "level": level,
-                    "time": _dt.now().strftime("%H:%M:%S"),
-                }
-                _scan_log.append(entry)
-                if len(_scan_log) > _MAX_LOG:
-                    _scan_log.pop(0)
-            sched.run_download_cycle(status_callback=_log_cb)
+            sched.run_download_cycle(status_callback=_make_log_cb())
+        finally:
+            _scanning = False
+
+
+def _make_log_cb():
+    """Return a status callback that appends timestamped entries to _scan_log."""
+    def _log_cb(msg: str, level: str = "info"):
+        entry = {
+            "msg":   msg,
+            "level": level,
+            "time":  datetime.now().strftime("%H:%M:%S"),
+        }
+        _scan_log.append(entry)
+        if len(_scan_log) > _MAX_LOG:
+            _scan_log.pop(0)
+    return _log_cb
+
+
+def _run_single_scan_thread(item_id: str, source: str) -> None:
+    """Download one manga / third-party site without running the full cycle."""
+    global _scanning, _scan_log
+    with _scan_lock:
+        _scanning = True
+        _scan_log = []
+        try:
+            cb  = _make_log_cb()
+            cfg = _load_config()
+            state = downloader.load_state()
+
+            nas_path      = cfg.get("nas_path", "./manga")
+            language      = cfg.get("language", "en")
+            image_quality = cfg.get("image_quality", "data")
+            page_delay    = float(cfg.get("page_delay_seconds", 0.5))
+            chapter_delay = float(cfg.get("chapter_delay_seconds", 2))
+            max_chapters  = int(cfg.get("max_chapters_per_run", 0))
+
+            if source == "MangaDex":
+                entry = next(
+                    (e for e in cfg.get("manga", []) if e.get("id") == item_id), {}
+                )
+                downloader.download_manga(
+                    manga_id=item_id,
+                    config_name=entry.get("name"),
+                    nas_path=nas_path,
+                    language=language,
+                    image_quality=image_quality,
+                    page_delay=page_delay,
+                    chapter_delay=chapter_delay,
+                    max_chapters=max_chapters,
+                    state=state,
+                    status_callback=cb,
+                )
+            else:
+                import re as _re
+                site_cfg = next(
+                    (s for s in cfg.get("third_party_sites", [])
+                     if f"_site_{_re.sub(r'[^a-z0-9]', '_', s.get('name','').lower())}" == item_id),
+                    None,
+                )
+                if site_cfg:
+                    from scrapers import generic_site
+                    generic_site.download_new_chapters(
+                        site_cfg=site_cfg,
+                        nas_path=nas_path,
+                        page_delay=page_delay,
+                        chapter_delay=chapter_delay,
+                        state=state,
+                        status_callback=cb,
+                    )
         finally:
             _scanning = False
 
@@ -317,6 +376,37 @@ def api_scan():
     thread = threading.Thread(target=_run_scan_thread, daemon=True)
     thread.start()
     return jsonify({"success": True, "message": "Scan started."})
+
+
+@app.route("/api/scan/single", methods=["POST"])
+def api_scan_single():
+    """Trigger a download for one specific manga (by id + source)."""
+    if _scanning:
+        return jsonify({"success": False, "message": "A scan is already in progress."})
+    data    = request.get_json(force=True) or {}
+    item_id = data.get("id", "").strip()
+    source  = data.get("source", "")
+    if not item_id:
+        return jsonify({"success": False, "message": "No id provided."}), 400
+    thread = threading.Thread(
+        target=_run_single_scan_thread, args=(item_id, source), daemon=True
+    )
+    thread.start()
+    return jsonify({"success": True})
+
+
+@app.route("/api/search/mangadex")
+def api_search_mangadex():
+    """Proxy a MangaDex title search — used by the Config page add-manga UI."""
+    query = request.args.get("q", "").strip()
+    if len(query) < 2:
+        return jsonify([])
+    try:
+        import mangadex_api as api
+        results = api.search_manga(query, limit=12)
+        return jsonify(results)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
 
 
 # ──────────────────────────────────────────────────────────────────────────────

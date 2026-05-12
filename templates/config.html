@@ -69,10 +69,13 @@
 <!-- MangaDex Manga List -->
 <div class="config-card">
   <h3 class="config-card-title">MangaDex Manga List</h3>
-  <p class="config-hint">
-    Paste a MangaDex URL or UUID.
-    Example: <code>https://mangadex.org/title/a77742b1-.../one-punch-man</code>
-  </p>
+
+  <!-- Search -->
+  <div class="manga-search-bar">
+    <input type="text" id="mangaSearchInput" placeholder="Search MangaDex by title..." autocomplete="off" />
+    <button class="btn btn-primary" onclick="searchMangaDex()">Search</button>
+  </div>
+  <div id="searchResults" class="search-results hidden"></div>
 
   <table class="manga-table" id="mangaTable">
     <thead>
@@ -85,10 +88,10 @@
     <tbody id="mangaTableBody"></tbody>
   </table>
 
-  <div class="add-manga-row">
+  <div class="add-manga-row" style="margin-top:12px">
     <input type="text" id="newMangaId"   placeholder="UUID or MangaDex URL" />
     <input type="text" id="newMangaName" placeholder="Display name (optional)" />
-    <button class="btn btn-secondary" onclick="addMangaRow()">+ Add</button>
+    <button class="btn btn-secondary" onclick="addMangaRow()">+ Add manually</button>
   </div>
 </div>
 
@@ -146,6 +149,45 @@
   </div>
 </div>
 
+
+<!-- Discord Notifications -->
+<div class="config-card">
+  <h3 class="config-card-title">Discord Notifications</h3>
+  <p class="config-hint">
+    After each scan that finds new chapters, a summary is posted to your Discord channel via a webhook.
+    <a href="https://support.discord.com/hc/en-us/articles/228383668" target="_blank" style="color:var(--accent)">How to create a webhook &rarr;</a>
+  </p>
+  <div class="form-grid">
+    <div class="form-group full-width">
+      <label>Discord Webhook URL</label>
+      <input type="text" id="discord_webhook_url" placeholder="https://discord.com/api/webhooks/..." />
+      <small>Leave blank to disable notifications.</small>
+    </div>
+  </div>
+</div>
+
+<!-- Komga Integration -->
+<div class="config-card">
+  <h3 class="config-card-title">Komga Integration</h3>
+  <p class="config-hint">
+    After new chapters download, the app will automatically trigger a Komga library rescan so chapters appear instantly without waiting for Komga's scheduled scan.
+  </p>
+  <div class="form-grid">
+    <div class="form-group full-width">
+      <label>Komga URL</label>
+      <input type="text" id="komga_url" placeholder="http://192.168.0.100:8080" />
+      <small>Base URL of your Komga server. Leave blank to disable.</small>
+    </div>
+    <div class="form-group">
+      <label>Komga Username</label>
+      <input type="text" id="komga_username" placeholder="admin" />
+    </div>
+    <div class="form-group">
+      <label>Komga Password</label>
+      <input type="password" id="komga_password" placeholder="••••••••" />
+    </div>
+  </div>
+</div>
 
 {% endblock %}
 

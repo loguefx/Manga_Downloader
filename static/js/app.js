@@ -187,10 +187,17 @@ function buildMangaCard(m) {
         </div>
       </div>
       <div class="manga-card-footer">
-        <button class="chapters-toggle" onclick="toggleChapters('${cardId}')">
-          <span>Chapter history (${m.chapters.length})</span>
-          <span class="toggle-arrow" id="arrow-${cardId}">&#9660;</span>
-        </button>
+        <div class="card-footer-actions">
+          <button class="chapters-toggle" onclick="toggleChapters('${cardId}')">
+            <span>Chapter history (${m.chapters.length})</span>
+            <span class="toggle-arrow" id="arrow-${cardId}">&#9660;</span>
+          </button>
+          <button class="btn-download-now" id="dl-${cardId}"
+                  onclick="downloadSingle('${m.id}','${m.source}','${cardId}')"
+                  title="Download new chapters for this manga now">
+            &#8595; Download Now
+          </button>
+        </div>
         <div class="chapters-list" id="chaplist-${cardId}">
           ${chapRows || '<div class="chapter-row"><span class="chapter-date" style="color:var(--text-muted)">No history recorded — chapters may exist on NAS from before tracking started.</span></div>'}
         </div>
@@ -226,6 +233,115 @@ async function triggerScan() {
   } catch (e) { alert("Could not contact server: " + e.message); }
 }
 
+async function downloadSingle(mangaId, source, cardId) {
+  const btn = document.getElementById(`dl-${cardId}`);
+  if (btn) { btn.disabled = true; btn.textContent = "⏳ Downloading..."; }
+
+  try {
+    const r = await fetch("/api/scan/single", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: mangaId, source }),
+    }).then(r => r.json());
+
+    if (!r.success) {
+      alert(r.message);
+      if (btn) { btn.disabled = false; btn.innerHTML = "&#8595; Download Now"; }
+      return;
+    }
+
+    // Show scan log and poll until done
+    const panel = document.getElementById("scanLogPanel");
+    if (panel) panel.classList.remove("hidden");
+    refreshStatus(true);
+
+    const poll = setInterval(async () => {
+      const s = await fetch("/api/status").then(r => r.json());
+      refreshScanLog(s.scanning);
+      if (!s.scanning) {
+        clearInterval(poll);
+        loadManga();
+        if (btn) { btn.disabled = false; btn.innerHTML = "&#8595; Download Now"; }
+      }
+    }, 2000);
+  } catch (e) {
+    alert("Error: " + e.message);
+    if (btn) { btn.disabled = false; btn.innerHTML = "&#8595; Download Now"; }
+  }
+}
+
+/* ── MangaDex Search ─────────────────────────────────────────────────────────── */
+
+let _searchTimeout = null;
+
+function searchMangaDex() {
+  const q = document.getElementById("mangaSearchInput")?.value.trim();
+  if (!q || q.length < 2) return;
+
+  const resultsEl = document.getElementById("searchResults");
+  resultsEl.classList.remove("hidden");
+  resultsEl.innerHTML = '<div class="search-loading">Searching MangaDex...</div>';
+
+  fetch(`/api/search/mangadex?q=${encodeURIComponent(q)}`)
+    .then(r => r.json())
+    .then(results => {
+      if (!results.length) {
+        resultsEl.innerHTML = '<div class="search-loading">No results found.</div>';
+        return;
+      }
+      resultsEl.innerHTML = results.map(r => `
+        <div class="search-result-item" id="sr-${r.id}">
+          <img class="search-result-cover"
+               src="${r.cover_url || ''}"
+               onerror="this.style.display='none'"
+               alt="" />
+          <div class="search-result-info">
+            <div class="search-result-title">${escHtml(r.title)}</div>
+            <div class="search-result-desc">${escHtml(r.description)}</div>
+          </div>
+          <button class="btn btn-secondary btn-sm" onclick="addFromSearch('${r.id}','${escHtml(r.title).replace(/'/g,"\\'")}')">
+            + Add
+          </button>
+        </div>`).join("");
+    })
+    .catch(() => {
+      resultsEl.innerHTML = '<div class="search-loading">Search failed — is the server running?</div>';
+    });
+}
+
+function addFromSearch(mangaId, title) {
+  // Check if already in list
+  const rows = document.querySelectorAll("#mangaTableBody tr");
+  for (const row of rows) {
+    if (row.querySelector("td")?.textContent.trim() === mangaId) {
+      showMsg("Already in your list.", false);
+      return;
+    }
+  }
+
+  const tbody = document.getElementById("mangaTableBody");
+  const tr = document.createElement("tr");
+  tr.innerHTML = `
+    <td><input type="text" class="manga-id-input"   value="${mangaId}" readonly /></td>
+    <td><input type="text" class="manga-name-input" value="${title}" /></td>
+    <td><button class="btn-remove" onclick="removeMangaRow(this)">Remove</button></td>`;
+  tbody.appendChild(tr);
+
+  // Mark as added in search results
+  const btn = document.querySelector(`#sr-${mangaId} button`);
+  if (btn) { btn.textContent = "✓ Added"; btn.disabled = true; }
+
+  saveConfig(true);
+}
+
+// Allow pressing Enter in the search box
+document.addEventListener("DOMContentLoaded", () => {
+  const inp = document.getElementById("mangaSearchInput");
+  if (inp) {
+    inp.addEventListener("keydown", e => { if (e.key === "Enter") searchMangaDex(); });
+  }
+});
+
 /* ── Config page ────────────────────────────────────────────────────────────── */
 
 let _currentConfig = {};
@@ -244,6 +360,11 @@ function populateForm(cfg) {
   setValue("chapter_delay_seconds", cfg.chapter_delay_seconds ?? 2);
   setValue("max_chapters_per_run",  cfg.max_chapters_per_run ?? 0);
   setValue("web_port",              cfg.web_port ?? 8080);
+  // Integrations
+  setValue("discord_webhook_url",   cfg.discord_webhook_url ?? "");
+  setValue("komga_url",             cfg.komga_url ?? "");
+  setValue("komga_username",        cfg.komga_username ?? "");
+  setValue("komga_password",        cfg.komga_password ?? "");
 
   renderMangaTable(cfg.manga ?? []);
   renderSitesTable(cfg.third_party_sites ?? []);
@@ -309,6 +430,10 @@ async function saveConfig(silent = false) {
     chapter_delay_seconds: parseFloat(document.getElementById("chapter_delay_seconds").value),
     max_chapters_per_run:  parseInt(document.getElementById("max_chapters_per_run").value, 10),
     web_port:              parseInt(document.getElementById("web_port").value, 10),
+    discord_webhook_url:   (document.getElementById("discord_webhook_url")?.value ?? "").trim(),
+    komga_url:             (document.getElementById("komga_url")?.value ?? "").trim(),
+    komga_username:        (document.getElementById("komga_username")?.value ?? "").trim(),
+    komga_password:        (document.getElementById("komga_password")?.value ?? "").trim(),
     manga: (tbody._list || []),
     third_party_sites: (sitesTbody._list || []),
     scrapers: {}
