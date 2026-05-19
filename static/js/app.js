@@ -168,6 +168,7 @@ function buildMangaCard(m) {
         <img class="manga-cover"
              src="${coverUrl}"
              alt="cover"
+             referrerpolicy="no-referrer"
              onerror="this.outerHTML='<div class=\\'manga-cover-placeholder\\'>&#128366;</div>'" />
         <div class="manga-meta">
           <div class="manga-title" title="${escHtml(m.name)}">${escHtml(m.name)}</div>
@@ -363,6 +364,7 @@ function searchMangaDex() {
         <div class="search-result-item" id="sr-${r.id}">
           <img class="search-result-cover"
                src="${r.cover_url || ''}"
+               referrerpolicy="no-referrer"
                onerror="this.style.display='none'"
                alt="" />
           <div class="search-result-info">

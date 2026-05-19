@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="referrer" content="no-referrer" />
   <title>{% block title %}Manga Downloader{% endblock %}</title>
   <link rel="stylesheet" href="/static/css/style.css" />
 </head>
@@ -17,7 +18,7 @@
       <a href="/" class="nav-link {% if request.path == '/' %}active{% endif %}">Dashboard</a>
       <a href="/browse" class="nav-link {% if request.path == '/browse' %}active{% endif %}">&#128269; Browse</a>
       <a href="/config" class="nav-link {% if request.path == '/config' %}active{% endif %}">Config</a>
-      <span class="nav-version" id="appVersion">v1.2.9</span>
+      <span class="nav-version" id="appVersion">v1.2.10</span>
     </div>
   </nav>
 

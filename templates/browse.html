@@ -131,6 +131,7 @@ function buildBrowseCard(m) {
   const inLib   = m.in_library;
   const cover   = m.cover_url
     ? `<img class="bc-cover" src="${m.cover_url}" alt="" loading="lazy"
+            referrerpolicy="no-referrer"
             onerror="this.outerHTML='<div class=\\'bc-cover bc-cover-placeholder\\'>&#128366;</div>'" />`
     : `<div class="bc-cover bc-cover-placeholder">&#128366;</div>`;
 
