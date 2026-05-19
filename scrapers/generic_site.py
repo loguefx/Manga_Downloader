@@ -213,8 +213,7 @@ def _extract_images_from_page(html: str, page_url: str) -> list[str]:
         return [u for _, u in direct_imgs]
 
     # ── Strategy 2: token CDN URLs embedded anywhere in the HTML ─────────────
-    token_urls = _FULL_TOKEN_URL_RE.findall(html)
-    if token_urls:
+    if _FULL_TOKEN_URL_RE.search(html):
         # _FULL_TOKEN_URL_RE.findall returns ext group — rebuild full URLs
         full_token_urls = _FULL_TOKEN_URL_RE.finditer(html)
         numbered: list[tuple[int, str]] = []
@@ -342,8 +341,10 @@ def download_new_chapters(
         _status(f"[{name}] Up to date (Ch.{int(latest)})", "uptodate")
         return 0
 
-    # Download all chapters newer than what we have
-    start = int(last_chapter) + 1 if last_chapter is not None else 1
+    # Download all chapters newer than what we have.
+    # Use ceil on last_chapter so e.g. 10.5 → start at 11, not 10.
+    import math
+    start = math.ceil(last_chapter) + 1 if last_chapter is not None else 1
     end = int(latest)
     chapters_to_download = list(range(start, end + 1))
 

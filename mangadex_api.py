@@ -199,6 +199,7 @@ def browse_manga(
         "offset": offset,
         "includes[]": ["cover_art"],
         "contentRating[]": ["safe", "suggestive"],
+        "availableTranslatedLanguage[]": "en",
         **order_map.get(sort, order_map["popular"]),
     }
     if query.strip():
@@ -215,6 +216,15 @@ def browse_manga(
         manga_id = manga["id"]
         title    = get_manga_title(manga)
         attrs    = manga.get("attributes", {})
+
+        # Skip manga locked by creator (no community chapters can be downloaded)
+        if attrs.get("isLocked"):
+            continue
+
+        # Confirm English chapters are actually available
+        available_langs = attrs.get("availableTranslatedLanguages", [])
+        if "en" not in available_langs:
+            continue
 
         desc_map    = attrs.get("description", {})
         description = desc_map.get("en", "") or next(iter(desc_map.values()), "")
@@ -247,6 +257,8 @@ def browse_manga(
 
     return {
         "results": results,
+        # Keep API total for pagination ("Load More") so it still works even
+        # when some titles are filtered out server-side.
         "total":   data.get("total", len(results)),
         "offset":  offset,
     }
@@ -261,7 +273,8 @@ def search_manga(query: str, limit: int = 12) -> list[dict]:
         "title": query,
         "limit": limit,
         "includes[]": ["cover_art"],
-        "contentRating[]": ["safe", "suggestive", "erotica", "pornographic"],
+        "contentRating[]": ["safe", "suggestive"],
+        "availableTranslatedLanguage[]": "en",
         "order[relevance]": "desc",
     }
     try:
@@ -275,6 +288,15 @@ def search_manga(query: str, limit: int = 12) -> list[dict]:
         manga_id = manga["id"]
         title    = get_manga_title(manga)
         attrs    = manga.get("attributes", {})
+
+        # Skip manga locked by creator (no community chapters can be downloaded)
+        if attrs.get("isLocked"):
+            continue
+
+        # Confirm English chapters are actually available
+        available_langs = attrs.get("availableTranslatedLanguages", [])
+        if "en" not in available_langs:
+            continue
 
         # Description (English preferred)
         desc_map = attrs.get("description", {})
@@ -299,6 +321,61 @@ def search_manga(query: str, limit: int = 12) -> list[dict]:
         })
 
     return results
+
+
+def has_downloadable_chapters(manga_id: str, language: str = "en") -> tuple[bool, str]:
+    """
+    Return (True, "") if the manga has at least one chapter with actual pages
+    downloadable through MangaDex at-home.
+
+    Returns (False, reason) when all available chapters carry an externalUrl
+    (e.g. official publisher links to Viz/Shonen Jump) or none exist at all.
+
+    Paginates through all available chapters so a series where only the first
+    batch is external but later ones are hosted doesn't get falsely blocked.
+    """
+    limit = 100
+    offset = 0
+    found_any = False
+
+    while True:
+        params = {
+            "translatedLanguage[]": language,
+            "limit": limit,
+            "offset": offset,
+            "order[chapter]": "asc",
+            "contentRating[]": ["safe", "suggestive", "erotica", "pornographic"],
+        }
+        try:
+            data = _get(f"/manga/{manga_id}/feed", params=params)
+        except Exception as exc:
+            log.warning("has_downloadable_chapters check failed for %s: %s", manga_id, exc)
+            # If we already found at least one hosted chapter, trust that.
+            # If we haven't found anything yet, assume downloadable to avoid
+            # over-blocking on transient API errors.
+            return True, ""
+
+        chapters = data.get("data", [])
+        total = data.get("total", 0)
+
+        for chapter in chapters:
+            found_any = True
+            ext_url = chapter.get("attributes", {}).get("externalUrl")
+            if ext_url is None:
+                return True, ""
+
+        offset += limit
+        if offset >= total or not chapters:
+            break
+
+    if not found_any:
+        return False, "No English chapters are available on MangaDex."
+
+    return (
+        False,
+        "All available chapters link to an external source (e.g. an official "
+        "publisher). MangaDex cannot be used to download this manga.",
+    )
 
 
 def download_image(url: str, retries: int = 3) -> bytes:

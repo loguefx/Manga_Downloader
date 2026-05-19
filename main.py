@@ -97,9 +97,9 @@ def main() -> None:
         return
 
     if args.daemon:
-    with open(CONFIG_PATH, "r", encoding="utf-8") as fh:
-        cfg = yaml.safe_load(fh) or {}
-    interval_hours: float = float(cfg.get("check_interval_hours", 6))
+        with open(CONFIG_PATH, "r", encoding="utf-8") as fh:
+            cfg = yaml.safe_load(fh) or {}
+        interval_hours: float = float(cfg.get("check_interval_hours", 6))
         log.info("Daemon mode - checking every %.1f hour(s). Press Ctrl+C to stop.", interval_hours)
         sched.run_download_cycle()
         schedule.every(interval_hours).hours.do(sched.run_download_cycle)

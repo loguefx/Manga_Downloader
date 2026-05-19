@@ -182,28 +182,31 @@ def _cbz_filename(series_name: str, chapter: dict) -> str:
 # Cover art
 # ──────────────────────────────────────────────────────────────────────────────
 
-def _download_cover_art(manga_id: str, series_dir: Path) -> None:
+def _download_cover_art(manga_id: str, series_dir: Path) -> Optional[str]:
     """
     Download the primary cover image and save it as folder.jpg in the series dir.
     Jellyfin reads folder.jpg as the series poster automatically.
-    Skips if folder.jpg already exists.
-    """
-    cover_path = series_dir / "folder.jpg"
-    if cover_path.exists():
-        return
+    Skips the download if folder.jpg already exists.
 
+    Returns the MangaDex CDN URL for the cover (useful as a fallback when the
+    NAS is not reachable), or None if no cover was found.
+    """
     cover_url = api.get_cover_url(manga_id, quality="512")
     if not cover_url:
         log.warning("  No cover art found for manga %s", manga_id)
-        return
+        return None
 
-    try:
-        img_bytes = api.download_image(cover_url)
-        with cover_path.open("wb") as fh:
-            fh.write(img_bytes)
-        log.info("  [COVER] Saved folder.jpg (%d KB)", len(img_bytes) // 1024)
-    except Exception as exc:
-        log.warning("  Could not download cover art: %s", exc)
+    cover_path = series_dir / "folder.jpg"
+    if not cover_path.exists():
+        try:
+            img_bytes = api.download_image(cover_url)
+            with cover_path.open("wb") as fh:
+                fh.write(img_bytes)
+            log.info("  [COVER] Saved folder.jpg (%d KB)", len(img_bytes) // 1024)
+        except Exception as exc:
+            log.warning("  Could not download cover art: %s", exc)
+
+    return cover_url
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -279,7 +282,10 @@ def download_manga(
     sync_state_from_nas(state, manga_id, series_dir, series_name)
     highest_chapter = get_last_chapter(state, manga_id)
 
-    _download_cover_art(manga_id, series_dir)
+    cover_url = _download_cover_art(manga_id, series_dir)
+    if cover_url:
+        state.setdefault(manga_id, {})["cover_url"] = cover_url
+        save_state(state)
 
     downloaded = 0
     batch_size = max_chapters if max_chapters else None
@@ -297,6 +303,20 @@ def download_manga(
             else:
                 _status(f"[MangaDex] {series_name} — done! {downloaded} chapter(s) saved.", "done")
             break
+
+        # Guard: if this is a brand-new series (nothing downloaded yet) and the
+        # earliest available chapter is not chapter 1, don't start mid-series.
+        # This prevents grabbing e.g. only chapter 36 when chapters 1-35 are
+        # unavailable/blocked on MangaDex.
+        if highest_chapter is None:
+            min_chap = min(_chapter_number(c) for c in chapters)
+            if min_chap > 1:
+                _status(
+                    f"[MangaDex] {series_name} — skipping: earliest available chapter is "
+                    f"Ch.{min_chap:.4g}, not Ch.1. Will not start mid-series.",
+                    "skip",
+                )
+                break
 
         total_remaining = len(chapters)
         batch = chapters[:batch_size] if batch_size else chapters

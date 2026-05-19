@@ -23,6 +23,15 @@
   </div>
 </div>
 
+<!-- Cleanup result modal -->
+<div id="cleanupModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:1000;align-items:center;justify-content:center">
+  <div style="background:var(--card-bg,#1e1e2e);border:1px solid var(--border,#333);border-radius:10px;padding:24px;max-width:540px;width:90%;max-height:80vh;overflow-y:auto">
+    <h3 id="cleanupModalTitle" style="margin:0 0 14px;font-size:16px">Cleanup Results</h3>
+    <div id="cleanupModalBody"></div>
+    <button class="btn btn-primary" style="margin-top:16px;width:100%" onclick="document.getElementById('cleanupModal').style.display='none';loadManga()">OK</button>
+  </div>
+</div>
+
 <!-- Live Scan Log -->
 <div class="scan-log-panel hidden" id="scanLogPanel">
   <div class="scan-log-header">
@@ -38,7 +47,12 @@
 <!-- Manga Grid -->
 <div class="section-header">
   <h2>Your Manga Library</h2>
-  <span class="count-badge" id="mangaCount">0 series</span>
+  <div style="display:flex;align-items:center;gap:10px">
+    <span class="count-badge" id="mangaCount">0 series</span>
+    <button class="btn btn-secondary" id="cleanupBtn" onclick="triggerCleanup()" title="Find and remove manga whose chapters are all blocked/external on MangaDex" style="font-size:13px;padding:6px 14px">
+      🧹 Clean Up Blocked
+    </button>
+  </div>
 </div>
 
 <div class="manga-grid" id="mangaGrid">

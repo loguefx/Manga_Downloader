@@ -26,17 +26,18 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
-APP_VERSION = "1.2.5"
+APP_VERSION = "1.2.6"
 
 CONFIG_PATH = paths.CONFIG_PATH
 STATE_FILE  = paths.STATE_FILE
 
 app = Flask(__name__, template_folder=paths.TEMPLATE_FOLDER, static_folder=paths.STATIC_FOLDER)
+app.config["TEMPLATES_AUTO_RELOAD"] = True
 log = logging.getLogger(__name__)
 
 _scan_lock = threading.Lock()
 _scanning = False
-_scan_log: list[str] = []
+_scan_log: list[dict] = []
 _MAX_LOG = 100
 
 
@@ -53,8 +54,8 @@ check_interval_hours: 6       # how often to auto-scan for new chapters
 language: "en"
 image_quality: "data"         # "data" = full quality, "data-saver" = compressed
 max_chapters_per_run: 0       # 0 = unlimited (download until caught up)
-page_delay: 0.3               # seconds between page downloads
-chapter_delay: 1.0            # seconds between chapters
+page_delay_seconds: 0.3       # seconds between page downloads
+chapter_delay_seconds: 1.0    # seconds between chapters
 web_port: 8080
 
 manga: []                     # add MangaDex manga via the Config page
@@ -336,6 +337,7 @@ def api_manga():
                 "total_chapters":  nas_count if nas_count > 0 else len(chapter_list),
                 "latest_chapter":  manga_state.get("last_chapter") or nas_highest,
                 "chapters":        chapter_list,
+                "cover_url":       manga_state.get("cover_url"),
                 "_sort_key":       last_dl,
             })
 
@@ -379,11 +381,40 @@ def api_manga():
 
 @app.route("/api/cover/<path:manga_name>")
 def api_cover(manga_name):
-    cfg = _load_config()
+    from flask import redirect
+    cfg  = _load_config()
     nas_path = cfg.get("nas_path", "")
-    cover_path = Path(nas_path) / manga_name / "folder.jpg"
-    if cover_path.exists():
-        return send_file(cover_path, mimetype="image/jpeg")
+
+    # Try NAS first (safe name then raw name)
+    for folder in [downloader._safe_name(manga_name), manga_name]:
+        p = Path(nas_path) / folder / "folder.jpg"
+        if p.exists():
+            return send_file(p, mimetype="image/jpeg")
+
+    # NAS not reachable — look up the cached CDN URL from state
+    state = downloader.load_state()
+    for manga_id, entry in state.items():
+        if manga_id.startswith("_"):
+            continue
+        if isinstance(entry, dict) and entry.get("title") == manga_name:
+            cdn = entry.get("cover_url")
+            if cdn:
+                return redirect(cdn)
+
+    # Last resort: match by config name → manga_id → fetch CDN URL live
+    try:
+        import mangadex_api as api
+        for entry in cfg.get("manga", []):
+            if entry.get("name", "") == manga_name:
+                cdn = api.get_cover_url(entry["id"], quality="512")
+                if cdn:
+                    # Cache it for next time
+                    state.setdefault(entry["id"], {})["cover_url"] = cdn
+                    downloader.save_state(state)
+                    return redirect(cdn)
+    except Exception:
+        pass
+
     abort(404)
 
 
@@ -470,6 +501,98 @@ def api_browse_mangadex():
     except Exception as exc:
         log.exception("api_browse_mangadex error: %s", exc)
         return jsonify({"results": [], "total": 0, "offset": offset})
+
+
+@app.route("/api/check/mangadex/<manga_id>")
+def api_check_mangadex(manga_id: str):
+    """Return whether a manga has chapters actually downloadable via MangaDex."""
+    try:
+        import mangadex_api as api
+        cfg      = _load_config()
+        language = cfg.get("language", "en")
+        ok, reason = api.has_downloadable_chapters(manga_id, language=language)
+        return jsonify({"downloadable": ok, "reason": reason})
+    except Exception as exc:
+        log.exception("api_check_mangadex error: %s", exc)
+        return jsonify({"downloadable": False, "reason": str(exc)})
+
+
+@app.route("/api/cleanup/blocked", methods=["POST"])
+def api_cleanup_blocked():
+    """
+    Scan every MangaDex manga in the library.  Any whose chapters are all
+    external / blocked gets removed from config, deleted from the NAS, and
+    purged from state.json.
+
+    Returns a summary of what was removed and what was kept.
+    """
+    import shutil
+    import mangadex_api as api
+
+    cfg      = _load_config()
+    state    = downloader.load_state()
+    language = cfg.get("language", "en")
+    nas_path = cfg.get("nas_path", "./manga")
+
+    manga_list = cfg.get("manga", [])
+    removed: list[dict] = []
+    kept:    list[dict] = []
+    errors:  list[str]  = []
+
+    for entry in manga_list:
+        manga_id = entry.get("id", "").strip()
+        name     = entry.get("name", "") or manga_id
+        if not manga_id:
+            kept.append(entry)
+            continue
+
+        try:
+            ok, reason = api.has_downloadable_chapters(manga_id, language=language)
+        except Exception as exc:
+            log.warning("cleanup: check failed for %s (%s): %s", name, manga_id, exc)
+            errors.append(f"Check failed for {name}: {exc}")
+            kept.append(entry)
+            continue
+
+        if ok:
+            kept.append(entry)
+            continue
+
+        # ── Blocked: purge NAS folder ──────────────────────────────────────
+        series_dir = Path(nas_path) / downloader._safe_name(name)
+        nas_deleted = False
+        if series_dir.exists():
+            try:
+                shutil.rmtree(series_dir)
+                nas_deleted = True
+                log.info("cleanup: deleted NAS folder %s", series_dir)
+            except Exception as exc:
+                errors.append(f"Could not delete folder for {name}: {exc}")
+                log.warning("cleanup: could not rmtree %s: %s", series_dir, exc)
+
+        # ── Purge from state.json ──────────────────────────────────────────
+        state.pop(manga_id, None)
+
+        removed.append({
+            "id":          manga_id,
+            "name":        name,
+            "reason":      reason,
+            "nas_deleted": nas_deleted,
+        })
+        log.info("cleanup: removed blocked manga %s (%s)", name, manga_id)
+
+    if removed:
+        cfg["manga"] = kept
+        _save_config(cfg)
+        downloader.save_state(state)
+        log.info("cleanup: removed %d blocked manga, kept %d", len(removed), len(kept))
+
+    return jsonify({
+        "success": True,
+        "removed": removed,
+        "kept_count": len(kept),
+        "errors":  errors,
+    })
 
 
 # ──────────────────────────────────────────────────────────────────────────────

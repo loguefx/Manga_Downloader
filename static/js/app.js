@@ -137,7 +137,9 @@ async function loadManga() {
 }
 
 function buildMangaCard(m) {
-  const coverUrl   = `/api/cover/${encodeURIComponent(m.name)}`;
+  // Use the cached MangaDex CDN URL if available (works even when NAS is offline),
+  // otherwise fall back to the proxied NAS cover endpoint.
+  const coverUrl = m.cover_url || `/api/cover/${encodeURIComponent(m.name)}`;
   const latestChap = m.latest_chapter != null ? `Ch. ${m.latest_chapter}` : "—";
 
   // Most recently downloaded chapter (chapters already sorted desc by number)
@@ -271,7 +273,7 @@ async function downloadSingle(mangaId, source, cardId) {
     // Show scan log and poll until done
     const panel = document.getElementById("scanLogPanel");
     if (panel) panel.classList.remove("hidden");
-    refreshStatus(true);
+    refreshStatus();
 
     const poll = setInterval(async () => {
       const s = await fetch("/api/status").then(r => r.json());
@@ -285,6 +287,52 @@ async function downloadSingle(mangaId, source, cardId) {
   } catch (e) {
     alert("Error: " + e.message);
     if (btn) { btn.disabled = false; btn.innerHTML = "&#8595; Download Now"; }
+  }
+}
+
+/* ── Cleanup blocked manga ───────────────────────────────────────────────────── */
+
+async function triggerCleanup() {
+  const btn = document.getElementById("cleanupBtn");
+  const modal = document.getElementById("cleanupModal");
+  const modalTitle = document.getElementById("cleanupModalTitle");
+  const modalBody  = document.getElementById("cleanupModalBody");
+
+  if (!confirm(
+    "This will check every MangaDex manga in your library.\n\n" +
+    "Any manga whose chapters are all blocked or hosted externally (e.g. Viz-licensed) " +
+    "will be removed from your library AND deleted from your NAS.\n\n" +
+    "This may take a minute. Continue?"
+  )) return;
+
+  if (btn) { btn.disabled = true; btn.textContent = "⏳ Checking…"; }
+
+  try {
+    const r = await fetch("/api/cleanup/blocked", { method: "POST" }).then(r => r.json());
+
+    if (r.removed.length === 0) {
+      modalTitle.textContent = "✅ Nothing to clean up";
+      modalBody.innerHTML = `<p style="color:var(--text-muted)">All ${r.kept_count} manga in your library have downloadable chapters on MangaDex.</p>`;
+    } else {
+      modalTitle.textContent = `🧹 Removed ${r.removed.length} blocked manga`;
+      const rows = r.removed.map(m => `
+        <div style="padding:8px 0;border-bottom:1px solid var(--border,#333)">
+          <strong>${escHtml(m.name)}</strong>
+          <span style="font-size:11px;color:var(--text-muted);margin-left:8px">${m.nas_deleted ? "NAS folder deleted" : "NAS folder not found"}</span>
+          <div style="font-size:12px;color:#e07070;margin-top:3px">${escHtml(m.reason)}</div>
+        </div>`).join("");
+      const errHtml = r.errors.length
+        ? `<div style="margin-top:12px;font-size:12px;color:#e07070"><strong>Errors:</strong><br>${r.errors.map(e => escHtml(e)).join("<br>")}</div>`
+        : "";
+      modalBody.innerHTML = rows + errHtml +
+        `<p style="margin-top:12px;font-size:13px;color:var(--text-muted)">${r.kept_count} manga remain in your library.</p>`;
+    }
+
+    modal.style.display = "flex";
+  } catch(e) {
+    alert("Cleanup failed: " + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "🧹 Clean Up Blocked"; }
   }
 }
 
@@ -303,6 +351,10 @@ function searchMangaDex() {
   fetch(`/api/search/mangadex?q=${encodeURIComponent(q)}`)
     .then(r => r.json())
     .then(results => {
+      if (!Array.isArray(results)) {
+        resultsEl.innerHTML = '<div class="search-loading">Search error — please try again.</div>';
+        return;
+      }
       if (!results.length) {
         resultsEl.innerHTML = '<div class="search-loading">No results found.</div>';
         return;
@@ -354,12 +406,6 @@ let _currentConfig = {};
 async function initConfig() {
   _currentConfig = await fetch("/api/config").then(r => r.json());
   populateForm(_currentConfig);
-
-  // Wire up Enter key for the search input
-  const searchInput = document.getElementById("mangaSearchInput");
-  if (searchInput) {
-    searchInput.addEventListener("keydown", e => { if (e.key === "Enter") searchMangaDex(); });
-  }
 }
 
 function populateForm(cfg) {

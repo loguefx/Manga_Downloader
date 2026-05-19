@@ -100,19 +100,24 @@ async function browseLoad(reset) {
 
     const grid = document.getElementById("browseGrid");
 
+    const newIds = [];
     data.results.forEach(m => {
       if (m.in_library) _browseInLib.add(m.id);
       grid.insertAdjacentHTML("beforeend", buildBrowseCard(m));
+      if (!m.in_library) newIds.push(m.id);
     });
 
-    const shown = parseInt(grid.querySelectorAll(".browse-card").length);
+    const shown = grid.querySelectorAll(".browse-card").length;
     document.getElementById("browseInfo").textContent =
-      `Showing ${shown} of ${_browseTotal.toLocaleString()} titles`;
+      `Showing ${shown} English title${shown !== 1 ? "s" : ""}`;
 
     if (_browseInLib.size > 0)
       document.getElementById("browseLibraryHint").classList.remove("hidden");
 
     browseShowLoadMore(_browseOffset < _browseTotal && data.results.length > 0);
+
+    // Run downloadability checks in the background and update buttons proactively
+    checkAllDownloadable(newIds);
   } catch(e) {
     document.getElementById("browseInfo").textContent = "Failed to load — is the server running?";
   }
@@ -139,7 +144,7 @@ function buildBrowseCard(m) {
 
   const addBtn = inLib
     ? `<button class="btn-bc-add in-library" id="add-${m.id}" disabled>&#9989; In Library</button>`
-    : `<button class="btn-bc-add" id="add-${m.id}"
+    : `<button class="btn-bc-add" id="add-${m.id}" data-manga-id="${m.id}"
               onclick="browseAddToLibrary('${m.id}','${escHtml(m.title).replace(/'/g,"\\'")}')">
          &#43; Add to Library
        </button>`;
@@ -155,6 +160,42 @@ function buildBrowseCard(m) {
       ${addBtn}
     </div>
   </div>`;
+}
+
+/* ── Background downloadability checks ── */
+// After cards render, silently check each one and disable buttons that can't
+// be downloaded (e.g. One Piece / Viz-hosted chapters with externalUrl).
+const _blockedIds = new Set();
+
+async function checkAllDownloadable(ids) {
+  if (!ids.length) return;
+  // Run checks with a small concurrency limit to avoid hammering MangaDex
+  const BATCH = 4;
+  for (let i = 0; i < ids.length; i += BATCH) {
+    const slice = ids.slice(i, i + BATCH);
+    await Promise.allSettled(slice.map(id => checkOneDownloadable(id)));
+  }
+}
+
+async function checkOneDownloadable(mangaId) {
+  try {
+    const res = await fetch(`/api/check/mangadex/${mangaId}`).then(r => r.json());
+    if (!res.downloadable) {
+      _blockedIds.add(mangaId);
+      markNotDownloadable(mangaId, res.reason);
+    }
+  } catch (_) { /* silently ignore network errors */ }
+}
+
+function markNotDownloadable(mangaId, reason) {
+  const btn  = document.getElementById(`add-${mangaId}`);
+  const card = document.getElementById(`bc-${mangaId}`);
+  if (!btn || btn.disabled) return;
+  btn.disabled = true;
+  btn.textContent = "⛔ Not on MangaDex";
+  btn.style.cssText = "background:#5a1a1a;color:#e07070;cursor:not-allowed;border-color:#7a2a2a";
+  btn.title = reason || "Chapters are not downloadable through MangaDex.";
+  if (card) card.classList.add("bc-blocked");
 }
 
 /* ── Controls ── */
@@ -181,18 +222,36 @@ function browseLoadMore() {
 async function browseAddToLibrary(mangaId, title) {
   const btn  = document.getElementById(`add-${mangaId}`);
   const card = document.getElementById(`bc-${mangaId}`);
-  if (btn) { btn.disabled = true; btn.textContent = "Saving..."; }
+  if (btn) { btn.disabled = true; btn.textContent = "Checking..."; }
 
   try {
+    // 0. Verify chapters are actually downloadable through MangaDex
+    // (may already be known from background check)
+    if (!_blockedIds.has(mangaId)) {
+      const check = await fetch(`/api/check/mangadex/${mangaId}`).then(r => r.json());
+      if (!check.downloadable) {
+        _blockedIds.add(mangaId);
+        showBrowseToast(`Cannot add "${title}": ${check.reason}`, false);
+        markNotDownloadable(mangaId, check.reason);
+        return;
+      }
+    } else {
+      // Already confirmed blocked by background check
+      showBrowseToast(`"${title}" is not downloadable through MangaDex.`, false);
+      if (btn) btn.disabled = true;
+      return;
+    }
+
     // 1. Check already in library
     const cfg = await fetch("/api/config").then(r => r.json());
-    if (cfg.manga.some(m => m.id === mangaId)) {
+    if ((cfg.manga ?? []).some(m => m.id === mangaId)) {
       showBrowseToast(`Already in library: ${title}`, false);
       if (btn) { btn.textContent = "✓ In Library"; btn.classList.add("in-library"); }
       return;
     }
 
     // 2. Save to config
+    if (!cfg.manga) cfg.manga = [];
     cfg.manga.push({ id: mangaId, name: title });
     const saveRes = await fetch("/api/config", {
       method: "POST",
@@ -240,8 +299,8 @@ async function pollUntilDone(mangaId, title, btn) {
     try {
       const s = await fetch("/api/status").then(r => r.json());
       if (!s.scanning) {
-        if (btn) { btn.textContent = "✓ Done"; }
-        showBrowseToast(`"${title}" downloaded & Komga updated!`, true);
+        if (btn) { btn.textContent = "✓ In Library"; }
+        showBrowseToast(`"${title}" scan complete — check your library for new chapters.`, true);
         return;
       }
     } catch(_) { /* ignore transient errors */ }
