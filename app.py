@@ -658,6 +658,48 @@ def _is_admin() -> bool:
         return False
 
 
+def _purge_stale_service(svc_name: str) -> None:
+    """
+    If a previous service registration is stuck in 'marked for deletion' state,
+    force-remove it via `sc delete` and wait for Windows to clean up the handle
+    before we attempt a fresh install.  Silently does nothing if the service is
+    healthy or not present at all.
+    """
+    import time
+    import pywintypes
+    import win32service
+    import win32serviceutil
+
+    try:
+        status = win32serviceutil.QueryServiceStatus(svc_name)
+        # SERVICE_RUNNING (4) – don't touch it
+        if status[1] == win32service.SERVICE_RUNNING:
+            return
+    except pywintypes.error:
+        # Service not installed – nothing to clean up
+        return
+
+    # Stop the service if it is still in a transient state
+    try:
+        win32serviceutil.StopService(svc_name)
+        time.sleep(2)
+    except Exception:
+        pass
+
+    # Force-delete via sc.exe so the registry key is released immediately
+    result = subprocess.run(
+        ["sc", "delete", svc_name],
+        capture_output=True, text=True, timeout=15,
+    )
+    if result.returncode == 0:
+        print(f"Cleaned up stale '{svc_name}' service registration.")
+        # Give SCM a moment to release its internal handles
+        time.sleep(3)
+    else:
+        # Not fatal – HandleCommandLine will surface a clear error if it fails
+        print(f"Warning: sc delete returned {result.returncode}: {result.stdout.strip()}")
+
+
 def _auto_service_start() -> None:
     """
     Default behaviour when the EXE is launched with no arguments:
@@ -712,6 +754,8 @@ def _auto_service_start() -> None:
 
     # ── Install if not present ────────────────────────────────────────────────
     if not is_installed:
+        # Clean up any stale "marked for deletion" registration before installing
+        _purge_stale_service(svc_name)
         log.info("Installing Manga Downloader Windows Service...")
         # Use a subprocess so HandleCommandLine's internal sys.exit() doesn't
         # terminate this process. Pass ONLY "install" so the child's sys.argv[1]
@@ -785,6 +829,12 @@ if __name__ == "__main__":
         try:
             import win32serviceutil
             from service import MangaDownloaderService
+
+            # When installing, pre-clean any service that is "marked for deletion"
+            # (Windows holds the registry entry until all SCM handles are closed).
+            if sys.argv[1].lower() == "install":
+                _purge_stale_service(MangaDownloaderService._svc_name_)
+
             win32serviceutil.HandleCommandLine(MangaDownloaderService)
         except ImportError:
             print("ERROR: pywin32 is not available. Cannot manage Windows Service.")
