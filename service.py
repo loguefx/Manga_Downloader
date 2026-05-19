@@ -64,22 +64,31 @@ class MangaDownloaderService(win32serviceutil.ServiceFramework):
         self._run()
 
     def _run(self):
-        import app as flask_app
+        import traceback
+        try:
+            import app as flask_app
 
-        flask_app._setup_logging(console=False)
+            flask_app._setup_logging(console=False)
 
-        flask_thread = threading.Thread(
-            target=flask_app.run_flask,
-            daemon=True,
-            name="flask",
-        )
-        flask_thread.start()
-        flask_app.start_scheduler()
-        logging.info("Manga Downloader service started — dashboard at http://localhost:8080")
+            flask_thread = threading.Thread(
+                target=flask_app.run_flask,
+                daemon=True,
+                name="flask",
+            )
+            flask_thread.start()
+            flask_app.start_scheduler()
+            logging.info("Manga Downloader service started — dashboard at http://localhost:8080")
 
-        # Block until Windows Service Control Manager sends a stop signal
-        win32event.WaitForSingleObject(self._stop_event, win32event.INFINITE)
-        logging.info("Manga Downloader service stopped.")
+            # Block until Windows Service Control Manager sends a stop signal
+            win32event.WaitForSingleObject(self._stop_event, win32event.INFINITE)
+            logging.info("Manga Downloader service stopped.")
+        except Exception as exc:
+            logging.error(
+                "Service crashed during startup: %s\n%s",
+                exc,
+                traceback.format_exc(),
+            )
+            raise
 
 
 if __name__ == "__main__":

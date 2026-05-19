@@ -32,7 +32,6 @@ CONFIG_PATH = paths.CONFIG_PATH
 STATE_FILE  = paths.STATE_FILE
 
 app = Flask(__name__, template_folder=paths.TEMPLATE_FOLDER, static_folder=paths.STATIC_FOLDER)
-app.config["TEMPLATES_AUTO_RELOAD"] = True
 log = logging.getLogger(__name__)
 
 _scan_lock = threading.Lock()
@@ -774,6 +773,7 @@ if __name__ == "__main__":
 
     if len(sys.argv) > 1 and sys.argv[1].lower() == "--dev":
         # Direct / development run — skip service machinery entirely
+        app.config["TEMPLATES_AUTO_RELOAD"] = True   # only in dev
         _setup_logging(console=True)
         cfg  = _load_config()
         port = cfg.get("web_port", 8080)
