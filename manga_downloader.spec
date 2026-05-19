@@ -14,6 +14,7 @@ a = Analysis(
         ('templates',  'templates'),   # Flask HTML templates
         ('static',     'static'),      # CSS / JS assets
         ('scrapers',   'scrapers'),    # scraper package
+        ('config.yaml', '.'),          # seed config bundled into EXE
     ],
     hiddenimports=[
         # Flask internals

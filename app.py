@@ -63,8 +63,28 @@ third_party_sites: []         # add third-party scrapers via the Config page
 """
 
 def _ensure_config() -> None:
-    """Create a starter config.yaml next to the EXE if one does not exist."""
-    if not CONFIG_PATH.exists():
+    """Write a starter config.yaml next to the EXE if one does not exist.
+
+    When running from a PyInstaller bundle the seed config.yaml (with the
+    full manga list baked in at build time) is extracted to sys._MEIPASS.
+    We copy that file so the server gets every series on first launch.
+    Falls back to the hardcoded _DEFAULT_CONFIG only if no bundle seed exists.
+    """
+    if CONFIG_PATH.exists():
+        return
+
+    # Prefer the seed config bundled into the EXE by PyInstaller
+    seed: Path | None = None
+    if hasattr(sys, "_MEIPASS"):
+        candidate = Path(sys._MEIPASS) / "config.yaml"
+        if candidate.exists():
+            seed = candidate
+
+    if seed:
+        import shutil
+        shutil.copy2(seed, CONFIG_PATH)
+        log.info("Deployed bundled config.yaml (%d series) to %s", CONFIG_PATH)
+    else:
         CONFIG_PATH.write_text(_DEFAULT_CONFIG, encoding="utf-8")
         log.info("Created default config.yaml at %s", CONFIG_PATH)
 
