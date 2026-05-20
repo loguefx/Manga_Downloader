@@ -53,12 +53,13 @@
 {% block scripts %}
 <script>
 /* ── State ── */
-let _browseSort   = "popular";
-let _browseQuery  = "";
-let _browseOffset = 0;
-let _browseTotal  = 0;
-let _browsing     = false;
-let _browseInLib  = new Set();
+let _browseSort    = "popular";
+let _browseQuery   = "";
+let _browseOffset  = 0;
+let _browseTotal   = 0;
+let _browsing      = false;
+let _browseInLib   = new Set();
+let _browseSeenIds = new Set();   // dedup guard across Load More pages
 
 /* ── Init ── */
 window.addEventListener("DOMContentLoaded", () => {
@@ -82,7 +83,8 @@ async function browseLoad(reset) {
   _browsing = true;
 
   if (reset) {
-    _browseOffset = 0;
+    _browseOffset  = 0;
+    _browseSeenIds = new Set();
     document.getElementById("browseGrid").innerHTML = "";
     document.getElementById("browseLibraryHint").classList.add("hidden");
   }
@@ -100,8 +102,16 @@ async function browseLoad(reset) {
 
     const grid = document.getElementById("browseGrid");
 
+    // Advance by the raw MangaDex page size (not the filtered count) so
+    // the next request doesn't overlap and produce duplicate cards.
+    _browseOffset = data.next_offset ?? (_browseOffset + 24);
+
     const newIds = [];
     data.results.forEach(m => {
+      // Skip if this ID was already rendered (cross-page duplicate from MangaDex)
+      if (_browseSeenIds.has(m.id)) return;
+      _browseSeenIds.add(m.id);
+
       if (m.in_library) _browseInLib.add(m.id);
       grid.insertAdjacentHTML("beforeend", buildBrowseCard(m));
       if (!m.in_library) newIds.push(m.id);
@@ -189,14 +199,17 @@ async function checkOneDownloadable(mangaId) {
 }
 
 function markNotDownloadable(mangaId, reason) {
-  const btn  = document.getElementById(`add-${mangaId}`);
-  const card = document.getElementById(`bc-${mangaId}`);
-  if (!btn || btn.disabled) return;
-  btn.disabled = true;
-  btn.textContent = "⛔ Not on MangaDex";
-  btn.style.cssText = "background:#5a1a1a;color:#e07070;cursor:not-allowed;border-color:#7a2a2a";
-  btn.title = reason || "Chapters are not downloadable through MangaDex.";
-  if (card) card.classList.add("bc-blocked");
+  // Use querySelectorAll so stale duplicates (if any slipped through) all get marked
+  document.querySelectorAll(`[id="add-${mangaId}"]`).forEach(btn => {
+    if (btn.disabled) return;
+    btn.disabled = true;
+    btn.textContent = "⛔ Not on MangaDex";
+    btn.style.cssText = "background:#5a1a1a;color:#e07070;cursor:not-allowed;border-color:#7a2a2a";
+    btn.title = reason || "Chapters are not downloadable through MangaDex.";
+  });
+  document.querySelectorAll(`[id="bc-${mangaId}"]`).forEach(card => {
+    card.classList.add("bc-blocked");
+  });
 }
 
 /* ── Controls ── */

@@ -256,11 +256,14 @@ def browse_manga(
         })
 
     return {
-        "results": results,
+        "results":     results,
         # Keep API total for pagination ("Load More") so it still works even
         # when some titles are filtered out server-side.
-        "total":   data.get("total", len(results)),
-        "offset":  offset,
+        "total":       data.get("total", len(results)),
+        "offset":      offset,
+        # Always advance by the raw page size so the next request doesn't
+        # re-fetch an overlapping page (which causes duplicate cards).
+        "next_offset": offset + limit,
     }
 
 
