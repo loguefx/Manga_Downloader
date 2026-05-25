@@ -167,6 +167,9 @@
     </div>
   </div>
   <div style="margin-top:12px;display:flex;align-items:center;gap:12px">
+    <button class="btn btn-primary" onclick="saveConfig()" style="font-size:13px;padding:6px 16px">
+      💾 Save
+    </button>
     <button class="btn btn-secondary" id="discordTestBtn" onclick="testDiscordWebhook()">
       🔔 Send Test Message
     </button>
@@ -199,7 +202,10 @@
       <input type="text" id="komga_library_id" placeholder="Leave blank to scan all libraries" />
       <small>If blank, all libraries are scanned. Find your Library ID in Komga → Settings → Libraries.</small>
     </div>
-    <div style="margin-top:12px">
+    <div style="margin-top:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <button class="btn btn-primary" onclick="saveConfig()" style="font-size:13px;padding:6px 16px">
+        💾 Save
+      </button>
       <button class="btn btn-secondary" onclick="triggerKomgaScan()" id="komgaScanBtn">
         &#128257; Scan Komga Now
       </button>
