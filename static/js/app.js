@@ -254,6 +254,37 @@ async function triggerKomgaScan() {
   setTimeout(() => { if (status) status.textContent = ""; }, 5000);
 }
 
+async function testDiscordWebhook() {
+  const btn    = document.getElementById("discordTestBtn");
+  const status = document.getElementById("discordTestStatus");
+  const url    = (document.getElementById("discord_webhook_url")?.value ?? "").trim();
+
+  if (!url) {
+    if (status) { status.textContent = "✗ Enter a webhook URL first."; status.style.color = "var(--accent)"; }
+    setTimeout(() => { if (status) status.textContent = ""; }, 4000);
+    return;
+  }
+
+  if (btn) { btn.disabled = true; btn.textContent = "Sending..."; }
+  if (status) status.textContent = "";
+  try {
+    const r = await fetch("/api/test/discord", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ discord_webhook_url: url }),
+    }).then(r => r.json());
+
+    if (status) {
+      status.textContent = r.success ? "✓ " + r.message : "✗ " + r.message;
+      status.style.color = r.success ? "var(--success)" : "var(--accent)";
+    }
+  } catch(e) {
+    if (status) { status.textContent = "✗ Request failed: " + e.message; status.style.color = "var(--accent)"; }
+  }
+  if (btn) { btn.disabled = false; btn.textContent = "🔔 Send Test Message"; }
+  setTimeout(() => { if (status) status.textContent = ""; }, 6000);
+}
+
 async function downloadSingle(mangaId, source, cardId) {
   const btn = document.getElementById(`dl-${cardId}`);
   if (btn) { btn.disabled = true; btn.textContent = "⏳ Downloading..."; }

@@ -57,6 +57,8 @@ page_delay_seconds: 0.3       # seconds between page downloads
 chapter_delay_seconds: 1.0    # seconds between chapters
 web_port: 8080
 
+discord_webhook_url: ""    # paste your Discord webhook URL here to enable notifications
+
 manga: []                     # add MangaDex manga via the Config page
 
 third_party_sites: []         # add third-party scrapers via the Config page
@@ -496,6 +498,46 @@ def api_komga_scan():
         return jsonify({"success": True, "message": "Komga scan triggered."})
     except Exception as exc:
         log.exception("api_komga_scan error: %s", exc)
+        return jsonify({"success": False, "message": str(exc)}), 500
+
+
+@app.route("/api/test/discord", methods=["POST"])
+def api_test_discord():
+    """Send a test Discord notification using the currently-configured webhook URL."""
+    try:
+        import requests as _requests
+        data = request.get_json(force=True) or {}
+        webhook_url = (
+            data.get("discord_webhook_url")
+            or _load_config().get("discord_webhook_url", "")
+        ).strip()
+
+        if not webhook_url:
+            return jsonify({"success": False, "message": "No webhook URL configured."}), 400
+
+        payload = {
+            "embeds": [{
+                "title": "✅ Manga Downloader — Test Notification",
+                "description": (
+                    "Your Discord webhook is connected and working!\n"
+                    "You'll receive a message like this after each scan that finds new chapters."
+                ),
+                "color": 0x43a047,
+                "footer": {
+                    "text": f"Manga Downloader v{APP_VERSION} • {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+                },
+            }]
+        }
+        resp = _requests.post(webhook_url, json=payload, timeout=10)
+        if resp.status_code in (200, 204):
+            return jsonify({"success": True, "message": "Test message sent — check your Discord channel!"})
+        else:
+            return jsonify({
+                "success": False,
+                "message": f"Discord returned HTTP {resp.status_code}: {resp.text[:200]}",
+            }), 400
+    except Exception as exc:
+        log.exception("api_test_discord error: %s", exc)
         return jsonify({"success": False, "message": str(exc)}), 500
 
 
