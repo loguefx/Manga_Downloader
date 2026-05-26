@@ -5,6 +5,7 @@ Imported by both app.py (daemon/web mode) and main.py (CLI mode).
 
 import logging
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -70,17 +71,28 @@ def run_download_cycle(status_callback=None) -> int:
 
     total_downloaded = 0
 
-    # ── MangaDex manga ────────────────────────────────────────────────────────
-    for entry in manga_list:
-        manga_id: str = entry.get("id", "").strip()
-        config_name: str = entry.get("name", "").strip() or None
+    # ── MangaDex manga (parallel workers) ────────────────────────────────────
+    # Up to 5 manga are checked concurrently.  Each worker calls download_manga
+    # which uses _state_lock internally for all state mutations, so concurrent
+    # writes are safe.  Page/chapter downloads are I/O-bound (network + NAS)
+    # so threading provides real speed-up without hitting GIL limits.
+    _WORKERS = 5
 
-        if not manga_id:
-            log.warning("Skipping entry with missing 'id': %s", entry)
-            continue
+    valid_entries = [
+        (e.get("id", "").strip(), e.get("name", "").strip() or None)
+        for e in manga_list
+        if e.get("id", "").strip()
+    ]
+    skipped = len(manga_list) - len(valid_entries)
+    if skipped:
+        log.warning("Skipping %d manga entries with missing 'id'.", skipped)
 
+    # Keyed by series title → sorted list of chapter numbers actually saved this run
+    scan_downloads: dict[str, list[float]] = {}
+
+    def _check_one(manga_id: str, config_name):
         try:
-            count = downloader.download_manga(
+            return downloader.download_manga(
                 manga_id=manga_id,
                 config_name=config_name,
                 nas_path=nas_path,
@@ -92,9 +104,20 @@ def run_download_cycle(status_callback=None) -> int:
                 state=state,
                 status_callback=status_callback,
             )
-            total_downloaded += count
         except Exception as exc:
             log.exception("Unexpected error processing manga %s: %s", manga_id, exc)
+            return 0, "", []
+
+    with ThreadPoolExecutor(max_workers=_WORKERS, thread_name_prefix="scan") as pool:
+        futures = {
+            pool.submit(_check_one, mid, name): mid
+            for mid, name in valid_entries
+        }
+        for fut in as_completed(futures):
+            count, title, chapters = fut.result()
+            total_downloaded += count
+            if chapters and title:
+                scan_downloads[title] = sorted(chapters)
 
     # ── Third-party website scrapers ──────────────────────────────────────────
     for site_cfg in cfg.get("third_party_sites", []):
@@ -119,56 +142,43 @@ def run_download_cycle(status_callback=None) -> int:
 
     # ── Post-scan integrations ────────────────────────────────────────────────
     if total_downloaded > 0:
-        _send_discord_notification(cfg, state, scan_start=now_str)
+        _send_discord_notification(cfg, scan_downloads, status_callback=_status)
         _trigger_komga_scan(cfg, _status)
+    else:
+        if cfg.get("discord_webhook_url", "").strip():
+            _status("Discord: no new chapters — notification skipped.", "info")
 
     return total_downloaded
 
 
 # ── Integration helpers ───────────────────────────────────────────────────────
 
-def _send_discord_notification(cfg: dict, state: dict, scan_start: str = "") -> None:
-    """Post a Discord embed listing every chapter downloaded in this scan."""
+def _send_discord_notification(cfg: dict, scan_downloads: dict, status_callback=None) -> None:
+    """Post a Discord embed listing every chapter actually downloaded in this scan.
+
+    scan_downloads: {series_title: [sorted chapter nums]} — built directly by
+    run_download_cycle so it only contains chapters saved in this run.
+    """
+    def _status(msg, level="info"):
+        if status_callback:
+            status_callback(msg, level)
+        log.info(msg)
+
     webhook_url = cfg.get("discord_webhook_url", "").strip()
     if not webhook_url:
         return
 
-    # Use the scan start timestamp as the cutoff so we only include chapters
-    # downloaded during THIS scan (not stale data from previous scans).
-    # Fall back to 2 hours ago if scan_start wasn't provided.
-    if scan_start:
-        cutoff = scan_start
-    else:
-        cutoff = (datetime.now() - timedelta(hours=2)).isoformat()
-
     lines = []
-    for key, val in state.items():
-        if key.startswith("_"):
+    for title, chapters in scan_downloads.items():
+        if not chapters:
             continue
-        if not isinstance(val, dict):
-            continue
-        title = val.get("title") or key
-        chapters_map = val.get("chapters", {})
-        if not chapters_map:
-            continue
-
-        recent = []
-        for chap_num, chap_data in chapters_map.items():
-            if isinstance(chap_data, dict) and chap_data.get("downloaded_at", "") >= cutoff:
-                try:
-                    recent.append(float(chap_num))
-                except ValueError:
-                    pass
-
-        if recent:
-            recent.sort()
-            chap_str = ", ".join(
-                str(int(c)) if c == int(c) else str(c) for c in recent
-            )
-            lines.append({"name": title, "value": f"Ch. {chap_str}", "inline": True})
+        chap_str = ", ".join(
+            str(int(c)) if c == int(c) else str(c) for c in chapters
+        )
+        lines.append({"name": title, "value": f"Ch. {chap_str}", "inline": True})
 
     if not lines:
-        log.info("Discord: no new chapters found in state — skipping notification.")
+        _status("Discord: no new chapters — notification skipped.", "info")
         return
 
     total_series  = len(lines)
@@ -193,11 +203,11 @@ def _send_discord_notification(cfg: dict, state: dict, scan_start: str = "") -> 
     try:
         resp = requests.post(webhook_url, json=payload, timeout=10)
         if resp.status_code in (200, 204):
-            log.info("Discord notification sent (%d series, %d chapters).", total_series, total_chapters)
+            _status(f"Discord: notification sent — {total_series} series, {total_chapters} chapter(s).", "done")
         else:
-            log.warning("Discord webhook returned %d: %s", resp.status_code, resp.text[:200])
+            _status(f"Discord: webhook error {resp.status_code} — {resp.text[:120]}", "error")
     except Exception as exc:
-        log.warning("Could not send Discord notification: %s", exc)
+        _status(f"Discord: failed to send notification — {exc}", "error")
 
 
 def _trigger_komga_scan(cfg: dict, _status=None) -> None:

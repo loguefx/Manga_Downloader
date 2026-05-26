@@ -21,13 +21,16 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from tqdm import tqdm
+# Protects all state-dict mutations and file writes across concurrent workers.
+_state_lock = threading.RLock()
+
 
 import mangadex_api as api
 
@@ -75,7 +78,8 @@ def load_state() -> dict:
 
 def save_state(state: dict) -> None:
     """Write state atomically — write to a temp file then rename so a crash
-    mid-write never leaves a half-written (corrupt) state.json."""
+    mid-write never leaves a half-written (corrupt) state.json.
+    The global _state_lock must be held by the caller."""
     tmp = STATE_FILE.with_suffix(".json.tmp")
     with tmp.open("w", encoding="utf-8") as fh:
         json.dump(state, fh, indent=2)
@@ -90,6 +94,7 @@ def get_last_chapter(state: dict, manga_id: str) -> Optional[float]:
 
 
 def set_last_chapter(state: dict, manga_id: str, chapter_num: float, title: str) -> None:
+    """Update last_chapter in state. Caller must hold _state_lock."""
     if manga_id not in state:
         state[manga_id] = {}
     state[manga_id]["last_chapter"] = chapter_num
@@ -97,7 +102,7 @@ def set_last_chapter(state: dict, manga_id: str, chapter_num: float, title: str)
 
 
 def record_chapter_download(state: dict, manga_id: str, chapter_num: float) -> None:
-    """Stamp a chapter as downloaded at the current time."""
+    """Stamp a chapter as downloaded at the current time. Caller must hold _state_lock."""
     state.setdefault(manga_id, {}).setdefault("chapters", {})[str(chapter_num)] = {
         "downloaded_at": datetime.now().isoformat(timespec="seconds")
     }
@@ -153,13 +158,13 @@ def sync_state_from_nas(state: dict, manga_id: str, series_dir: Path, title: str
             len(nas_chapters),
             highest,
         )
-        set_last_chapter(state, manga_id, highest, title)
-        # Stamp all found chapters in the chapters map (without a real date)
-        chapters_map = state.setdefault(manga_id, {}).setdefault("chapters", {})
-        for num in nas_chapters:
-            if str(num) not in chapters_map:
-                chapters_map[str(num)] = {"downloaded_at": "pre-existing"}
-        save_state(state)
+        with _state_lock:
+            set_last_chapter(state, manga_id, highest, title)
+            chapters_map = state.setdefault(manga_id, {}).setdefault("chapters", {})
+            for num in nas_chapters:
+                if str(num) not in chapters_map:
+                    chapters_map[str(num)] = {"downloaded_at": "pre-existing"}
+            save_state(state)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -274,11 +279,11 @@ def download_manga(
     max_chapters: int,
     state: dict,
     status_callback=None,
-) -> int:
+) -> tuple[int, str, list[float]]:
     """
     Check for and download new chapters for one manga.
 
-    Returns the number of chapters newly downloaded.
+    Returns (count, series_title, [chapter_nums_downloaded]).
     """
     def _status(msg: str, level: str = "info"):
         log.info(msg)
@@ -290,7 +295,7 @@ def download_manga(
         manga_info = api.get_manga_info(manga_id)
     except Exception as exc:
         log.error("Could not fetch manga info for %s: %s", manga_id, exc)
-        return 0
+        return 0, "", []
 
     api_title = api.get_manga_title(manga_info)
     series_name = config_name or api_title
@@ -304,12 +309,21 @@ def download_manga(
     sync_state_from_nas(state, manga_id, series_dir, series_name)
     highest_chapter = get_last_chapter(state, manga_id)
 
-    cover_url = _download_cover_art(manga_id, series_dir)
-    if cover_url:
-        state.setdefault(manga_id, {})["cover_url"] = cover_url
-        save_state(state)
+    # Skip the MangaDex cover API call if we already have the URL cached and
+    # folder.jpg is already on disk — saves one extra round-trip per manga per scan.
+    cached_cover = state.get(manga_id, {}).get("cover_url")
+    cover_path   = series_dir / "folder.jpg"
+    if cached_cover and cover_path.exists():
+        cover_url = cached_cover
+    else:
+        cover_url = _download_cover_art(manga_id, series_dir)
+        if cover_url:
+            with _state_lock:
+                state.setdefault(manga_id, {})["cover_url"] = cover_url
+                save_state(state)
 
     downloaded = 0
+    downloaded_chapters: list[float] = []
     batch_size = max_chapters if max_chapters else None
 
     while True:
@@ -377,7 +391,7 @@ def download_manga(
             # Download pages
             pages: list[bytes] = []
             failed = False
-            for url in tqdm(page_urls, desc=f"Ch {chap_num:.4g}", unit="pg", leave=False):
+            for url in page_urls:
                 try:
                     img = api.download_image(url)
                     pages.append(img)
@@ -405,14 +419,16 @@ def download_manga(
                 "saved"
             )
             downloaded += 1
+            downloaded_chapters.append(chap_num)
 
             if highest_chapter is None or chap_num > highest_chapter:
                 highest_chapter = chap_num
 
             if highest_chapter is not None:
-                set_last_chapter(state, manga_id, highest_chapter, series_name)
-                record_chapter_download(state, manga_id, chap_num)
-                save_state(state)
+                with _state_lock:
+                    set_last_chapter(state, manga_id, highest_chapter, series_name)
+                    record_chapter_download(state, manga_id, chap_num)
+                    save_state(state)
 
             time.sleep(chapter_delay)
 
@@ -421,4 +437,4 @@ def download_manga(
                 _status(f"[MangaDex] {series_name} — done! {downloaded} chapter(s) saved.", "done")
             break
 
-    return downloaded
+    return downloaded, series_name, downloaded_chapters

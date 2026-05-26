@@ -138,6 +138,13 @@ def _run_scan_thread() -> None:
             sched.run_download_cycle(status_callback=_make_log_cb())
         finally:
             _scanning = False
+            # Persist the log so other clients (and future restarts) can see it
+            try:
+                state = downloader.load_state()
+                state.setdefault("_meta", {})["last_scan_log"] = list(_scan_log)
+                downloader.save_state(state)
+            except Exception as exc:
+                log.warning("Could not persist scan log to state: %s", exc)
 
 
 def _make_log_cb():
@@ -223,6 +230,46 @@ def start_scheduler() -> None:
     """Start the background scheduler thread. Called at app startup."""
     t = threading.Thread(target=_scheduler_loop, daemon=True, name="scheduler")
     t.start()
+    # Pre-warm cover URLs for all manga that don't have one cached yet
+    pw = threading.Thread(target=_prefetch_cover_urls, daemon=True, name="cover-prefetch")
+    pw.start()
+
+
+def _prefetch_cover_urls() -> None:
+    """Run once on startup: fetch and cache CDN cover URLs for any manga
+    that doesn't already have one in state.json.  Runs in a background thread
+    so it never blocks the server from starting."""
+    import time
+    time.sleep(5)  # let the server finish starting before hitting MangaDex
+    try:
+        import mangadex_api as api
+        cfg   = _load_config()
+        state = downloader.load_state()
+        missing = [
+            e.get("id", "").strip()
+            for e in cfg.get("manga", [])
+            if e.get("id", "").strip()
+            and not state.get(e.get("id", "").strip(), {}).get("cover_url")
+        ]
+        if not missing:
+            log.info("Cover prefetch: all covers already cached.")
+            return
+        log.info("Cover prefetch: fetching URLs for %d manga...", len(missing))
+        updated = 0
+        for manga_id in missing:
+            try:
+                url = api.get_cover_url(manga_id, quality="256")
+                if url:
+                    state.setdefault(manga_id, {})["cover_url"] = url
+                    updated += 1
+                time.sleep(0.3)   # be polite to MangaDex
+            except Exception as exc:
+                log.debug("Cover prefetch failed for %s: %s", manga_id, exc)
+        if updated:
+            downloader.save_state(state)
+            log.info("Cover prefetch: cached %d new cover URLs.", updated)
+    except Exception as exc:
+        log.warning("Cover prefetch error: %s", exc)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -445,7 +492,13 @@ def api_cover(manga_name):
 
 @app.route("/api/scan-log")
 def api_scan_log():
-    return jsonify({"log": _scan_log, "scanning": _scanning})
+    # If no in-memory log yet (e.g. fresh server restart), return the last
+    # persisted scan log so the second computer still sees meaningful data.
+    if _scan_log:
+        return jsonify({"log": _scan_log, "scanning": _scanning})
+    state = _load_state()
+    persisted = state.get("_meta", {}).get("last_scan_log", [])
+    return jsonify({"log": persisted, "scanning": _scanning})
 
 
 @app.route("/api/scan", methods=["POST"])
