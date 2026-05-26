@@ -48,16 +48,38 @@ _CHAP_NUM_RE = re.compile(
 # ──────────────────────────────────────────────────────────────────────────────
 
 def load_state() -> dict:
-    """Return the persisted state dict, or an empty one if none exists yet."""
-    if STATE_FILE.exists():
+    """Return the persisted state dict, or an empty one if none exists yet.
+
+    If state.json is corrupted (truncated write, disk error, etc.) the bad
+    file is backed up to state.json.bak and an empty dict is returned so the
+    server keeps running rather than crashing on every request.
+    """
+    if not STATE_FILE.exists():
+        return {}
+    try:
         with STATE_FILE.open("r", encoding="utf-8") as fh:
-            return json.load(fh)
-    return {}
+            return json.load(fh) or {}
+    except (json.JSONDecodeError, ValueError) as exc:
+        log.error(
+            "state.json is corrupted (%s) — backing up to state.json.bak and starting fresh.",
+            exc,
+        )
+        import shutil
+        backup = STATE_FILE.with_suffix(".json.bak")
+        try:
+            shutil.copy2(STATE_FILE, backup)
+        except Exception:
+            pass
+        return {}
 
 
 def save_state(state: dict) -> None:
-    with STATE_FILE.open("w", encoding="utf-8") as fh:
+    """Write state atomically — write to a temp file then rename so a crash
+    mid-write never leaves a half-written (corrupt) state.json."""
+    tmp = STATE_FILE.with_suffix(".json.tmp")
+    with tmp.open("w", encoding="utf-8") as fh:
         json.dump(state, fh, indent=2)
+    tmp.replace(STATE_FILE)
 
 
 def get_last_chapter(state: dict, manga_id: str) -> Optional[float]:
