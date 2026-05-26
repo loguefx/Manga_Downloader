@@ -119,7 +119,7 @@ def run_download_cycle(status_callback=None) -> int:
 
     # ── Post-scan integrations ────────────────────────────────────────────────
     if total_downloaded > 0:
-        _send_discord_notification(cfg, state)
+        _send_discord_notification(cfg, state, scan_start=now_str)
         _trigger_komga_scan(cfg, _status)
 
     return total_downloaded
@@ -127,13 +127,20 @@ def run_download_cycle(status_callback=None) -> int:
 
 # ── Integration helpers ───────────────────────────────────────────────────────
 
-def _send_discord_notification(cfg: dict, state: dict) -> None:
-    """Post a Discord embed listing every newly downloaded chapter."""
+def _send_discord_notification(cfg: dict, state: dict, scan_start: str = "") -> None:
+    """Post a Discord embed listing every chapter downloaded in this scan."""
     webhook_url = cfg.get("discord_webhook_url", "").strip()
     if not webhook_url:
         return
 
-    # Collect chapter download records from state, grouped by manga name
+    # Use the scan start timestamp as the cutoff so we only include chapters
+    # downloaded during THIS scan (not stale data from previous scans).
+    # Fall back to 2 hours ago if scan_start wasn't provided.
+    if scan_start:
+        cutoff = scan_start
+    else:
+        cutoff = (datetime.now() - timedelta(hours=2)).isoformat()
+
     lines = []
     for key, val in state.items():
         if key.startswith("_"):
@@ -144,30 +151,41 @@ def _send_discord_notification(cfg: dict, state: dict) -> None:
         chapters_map = val.get("chapters", {})
         if not chapters_map:
             continue
-        # Only include chapters downloaded in the last hour
+
         recent = []
-        cutoff = (datetime.now() - timedelta(hours=1)).isoformat()
         for chap_num, chap_data in chapters_map.items():
             if isinstance(chap_data, dict) and chap_data.get("downloaded_at", "") >= cutoff:
-                recent.append(float(chap_num))
+                try:
+                    recent.append(float(chap_num))
+                except ValueError:
+                    pass
+
         if recent:
             recent.sort()
             chap_str = ", ".join(
-                str(int(c) if c == int(c) else c) for c in recent
+                str(int(c)) if c == int(c) else str(c) for c in recent
             )
             lines.append({"name": title, "value": f"Ch. {chap_str}", "inline": True})
 
     if not lines:
+        log.info("Discord: no new chapters found in state — skipping notification.")
         return
 
-    total = sum(1 for f in lines for _ in [f])
+    total_series  = len(lines)
+    total_chapters = sum(
+        len(f["value"].replace("Ch. ", "").split(", ")) for f in lines
+    )
+
     payload = {
         "embeds": [{
-            "title": "Manga Downloader — New Chapters Ready",
+            "title": "📖 Manga Downloader — New Chapters Ready!",
             "color": 0xe53935,
-            "fields": lines[:25],
+            "fields": lines[:25],   # Discord hard limit: 25 fields per embed
             "footer": {
-                "text": f"{len(lines)} series updated • {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+                "text": (
+                    f"{total_series} series • {total_chapters} chapter(s) downloaded"
+                    f" • {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+                )
             },
         }]
     }
@@ -175,7 +193,7 @@ def _send_discord_notification(cfg: dict, state: dict) -> None:
     try:
         resp = requests.post(webhook_url, json=payload, timeout=10)
         if resp.status_code in (200, 204):
-            log.info("Discord notification sent.")
+            log.info("Discord notification sent (%d series, %d chapters).", total_series, total_chapters)
         else:
             log.warning("Discord webhook returned %d: %s", resp.status_code, resp.text[:200])
     except Exception as exc:
