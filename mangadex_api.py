@@ -53,8 +53,70 @@ def _get(path: str, params: Optional[dict] = None, retries: int = 3) -> dict:
 
 def get_manga_info(manga_id: str) -> dict:
     """Return basic info about a manga (title, etc.)."""
-    data = _get(f"/manga/{manga_id}")
+    data = _get(f"/manga/{manga_id}", params={"includes[]": ["author", "artist"]})
     return data.get("data", {})
+
+
+def get_manga_metadata(manga_info: dict) -> dict:
+    """
+    Extract ComicInfo-compatible metadata from a manga info object.
+
+    Returns a dict with keys:
+      summary, genres, tags, writer, penciller, publisher, age_rating, language
+    """
+    attrs = manga_info.get("attributes", {})
+
+    # Summary — prefer English, fall back to first available
+    desc_map: dict = attrs.get("description", {})
+    summary = desc_map.get("en") or next(iter(desc_map.values()), "")
+
+    # Genres and tags from the MangaDex tag system
+    genres: list[str] = []
+    tags:   list[str] = []
+    for tag in attrs.get("tags", []):
+        tag_attrs = tag.get("attributes", {})
+        group = tag_attrs.get("group", "")
+        name  = tag_attrs.get("name", {})
+        label = name.get("en") or next(iter(name.values()), "")
+        if not label:
+            continue
+        if group == "genre":
+            genres.append(label)
+        elif group in ("theme", "format", "content"):
+            tags.append(label)
+
+    # Author / artist from relationships (included via includes[]=author,artist)
+    writer    = ""
+    penciller = ""
+    for rel in manga_info.get("relationships", []):
+        rel_type  = rel.get("type", "")
+        rel_attrs = rel.get("attributes") or {}
+        name      = rel_attrs.get("name", "")
+        if rel_type == "author" and not writer:
+            writer = name
+        elif rel_type == "artist" and not penciller:
+            penciller = name
+
+    # Age rating
+    content_rating = attrs.get("contentRating", "")
+    age_rating_map = {
+        "safe":         "Everyone",
+        "suggestive":   "Teen",
+        "erotica":      "Mature 17+",
+        "pornographic": "Adults Only 18+",
+    }
+    age_rating = age_rating_map.get(content_rating, "")
+
+    return {
+        "summary":    summary,
+        "genres":     ", ".join(genres),
+        "tags":       ", ".join(tags),
+        "writer":     writer,
+        "penciller":  penciller,
+        "publisher":  "",
+        "age_rating": age_rating,
+        "language":   "en",
+    }
 
 
 def get_manga_title(manga_info: dict) -> str:

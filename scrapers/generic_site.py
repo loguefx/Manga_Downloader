@@ -306,6 +306,8 @@ def download_new_chapters(
     chapter_delay: float,
     state: dict,
     status_callback=None,
+    search_paths=None,
+    new_manga_path=None,
 ) -> int:
     """
     Check for and download new chapters for one configured third-party site.
@@ -316,6 +318,11 @@ def download_new_chapters(
     nas_folder: str = site_cfg.get("nas_folder") or name
     state_key: str = f"_site_{re.sub(r'[^a-z0-9]', '_', name.lower())}"
 
+    if search_paths is None:
+        search_paths = [nas_path]
+    if new_manga_path is None:
+        new_manga_path = nas_path
+
     def _status(msg: str, level: str = "info"):
         log.info(msg)
         if status_callback:
@@ -323,7 +330,7 @@ def download_new_chapters(
 
     _status(f"[{name}] Checking for new chapters...", "manga")
 
-    series_dir = Path(nas_path) / re.sub(r'[\\/*?:"<>|]', "_", nas_folder).strip()
+    series_dir = downloader.resolve_series_dir(nas_folder, search_paths, new_manga_path)
     series_dir.mkdir(parents=True, exist_ok=True)
 
     # Sync state from whatever is already on the NAS

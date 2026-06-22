@@ -1,3 +1,5 @@
+additional_nas_paths:
+- //192.168.0.181/Jellyfin6/Manga
 chapter_delay_seconds: 2
 check_interval_hours: 6
 discord_webhook_url: https://discord.com/api/webhooks/1508600530195185796/-EqUbgWG81CiaKE4AVgcvgSgCytIXUe94jIGnq6Rr88zq_aUUAZTZdOzLK3zqL4iOsOx
@@ -207,8 +209,11 @@ manga:
   name: You Like Me, Don't You?
 - id: 2b37189e-0bb2-4586-9757-b3fe6acd77b3
   name: The War of Greedy Witches
+- id: 65ab0e41-9cf9-420c-b860-2457d8cf403e
+  name: The Demon King’s Daughter Wants to Marry the Hero in a Political Marriage
 max_chapters_per_run: 0
-nas_path: //192.168.0.181/Jellyfin6/Manga
+nas_path: //192.168.0.181/Jellyfin2/Manga
+new_manga_nas_path: ''
 page_delay_seconds: 0.5
 scrapers: {}
 third_party_sites:
@@ -223,3 +228,12 @@ third_party_sites:
   name: One Piece
   nas_folder: One Piece
 web_port: 8080
+webtoon_series:
+- enabled: true
+  name: Fog Land
+  nas_folder: Fog Land
+  url: https://www.webtoons.com/en/action/fog-land/list?title_no=9299
+- name: My S-Class Hunters
+  url: https://www.webtoons.com/en/action/my-s-class-hunters/list?title_no=3963
+  nas_folder: My S-Class Hunters
+  enabled: true

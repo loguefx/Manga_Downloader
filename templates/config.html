@@ -66,6 +66,38 @@
   </div>
 </div>
 
+<!-- Storage / NAS Paths -->
+<div class="config-card">
+  <h3 class="config-card-title">Storage Paths</h3>
+  <p class="config-hint">
+    Existing manga are updated wherever their folder already lives (all paths below are searched).
+    Brand-new manga are saved to the <strong>New Manga Path</strong> — set this to a drive with free
+    space once your primary NAS fills up.
+  </p>
+
+  <div class="form-grid">
+    <div class="form-group">
+      <label>New Manga Path</label>
+      <input type="text" id="new_manga_nas_path" placeholder="(leave blank to use the primary NAS path above)" />
+      <small>Where newly-added series are downloaded. Existing series stay on their current path.</small>
+    </div>
+  </div>
+
+  <label style="display:block;margin:14px 0 6px;font-size:13px;color:var(--text-muted)">
+    Additional NAS Paths (searched for existing series)
+  </label>
+  <table class="manga-table" id="nasPathsTable">
+    <thead>
+      <tr><th>Path</th><th style="width:80px">Action</th></tr>
+    </thead>
+    <tbody id="nasPathsBody"></tbody>
+  </table>
+  <div style="display:flex;gap:8px;margin-top:10px">
+    <input type="text" id="newNasPathInput" placeholder="//192.168.0.181/Jellyfin5/Manga" style="flex:1" />
+    <button class="btn btn-secondary" onclick="addNasPathRow()">Add Path</button>
+  </div>
+</div>
+
 <!-- MangaDex Manga List -->
 <div class="config-card">
   <div class="config-card-header">
@@ -151,6 +183,54 @@
   </div>
 </div>
 
+
+<!-- Webtoon Series -->
+<div class="config-card">
+  <div class="config-card-header">
+    <h3 class="config-card-title">
+      Webtoon Series
+      <span class="manga-count-badge" id="webtoonCountLabel">0</span>
+    </h3>
+  </div>
+  <p class="config-hint">
+    Add series from <strong>webtoons.com</strong>. Paste the full series URL (e.g.
+    <code>https://www.webtoons.com/en/romance/my-series/list?title_no=12345</code>).
+    Each episode is downloaded and packaged as a CBZ file.
+  </p>
+
+  <table class="manga-table" id="webtoonTable">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Series URL</th>
+        <th>NAS Folder</th>
+        <th>On</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody id="webtoonTableBody"></tbody>
+  </table>
+
+  <div class="add-site-form" style="margin-top:16px">
+    <h4 style="margin-bottom:12px;font-size:13px;color:var(--text-secondary)">Add Webtoon Series</h4>
+    <div class="form-grid">
+      <div class="form-group">
+        <label>Series Name</label>
+        <input type="text" id="newWebtoonName" placeholder="My Webtoon Series" />
+      </div>
+      <div class="form-group full-width">
+        <label>Series URL</label>
+        <input type="text" id="newWebtoonUrl" placeholder="https://www.webtoons.com/en/genre/series-name/list?title_no=12345" />
+        <small>Paste the /list URL from webtoons.com</small>
+      </div>
+      <div class="form-group">
+        <label>NAS Folder Name</label>
+        <input type="text" id="newWebtoonFolder" placeholder="Leave blank to use series name" />
+      </div>
+    </div>
+    <button class="btn btn-secondary" style="margin-top:12px" onclick="addWebtoonRow()">+ Add Webtoon</button>
+  </div>
+</div>
 
 <!-- Discord Notifications -->
 <div class="config-card">

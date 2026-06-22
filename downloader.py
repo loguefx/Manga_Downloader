@@ -33,6 +33,8 @@ _state_lock = threading.RLock()
 
 
 import mangadex_api as api
+import comicinfo as ci_mod
+from comicinfo import ComicInfoData
 
 log = logging.getLogger(__name__)
 
@@ -179,6 +181,71 @@ def _safe_name(name: str) -> str:
     return _INVALID_PATH_CHARS.sub("_", name).strip()
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Multi-NAS path resolution
+# ──────────────────────────────────────────────────────────────────────────────
+
+def get_nas_search_paths(cfg: dict) -> list[str]:
+    """
+    Return all NAS paths to search for existing series, in priority order:
+    the primary nas_path first, then any additional_nas_paths.
+    """
+    paths: list[str] = []
+    primary = (cfg.get("nas_path") or "").strip()
+    if primary:
+        paths.append(primary)
+    for p in cfg.get("additional_nas_paths", []) or []:
+        p = (p or "").strip()
+        if p and p not in paths:
+            paths.append(p)
+    return paths
+
+
+def get_new_manga_nas_path(cfg: dict) -> str:
+    """
+    Return the NAS path where brand-new manga (not found on any existing path)
+    should be saved. Falls back to the primary nas_path if unset.
+    """
+    new_path = (cfg.get("new_manga_nas_path") or "").strip()
+    return new_path or (cfg.get("nas_path") or "").strip()
+
+
+def find_existing_series_dir(series_name: str, search_paths: list[str]) -> Optional[Path]:
+    """
+    Search every NAS path for an existing folder for this series.
+    Returns the first matching directory, or None if not found anywhere.
+    """
+    safe = _safe_name(series_name)
+    for base in search_paths:
+        if not base:
+            continue
+        candidate = Path(base) / safe
+        try:
+            if candidate.exists():
+                return candidate
+        except OSError:
+            # NAS path unreachable — skip it rather than crashing the scan.
+            continue
+    return None
+
+
+def resolve_series_dir(
+    series_name: str,
+    search_paths: list[str],
+    new_manga_path: str,
+) -> Path:
+    """
+    Decide which directory a series should use:
+      - If it already exists on any configured NAS path, keep using that one.
+      - Otherwise (brand-new manga), place it on new_manga_path.
+    """
+    existing = find_existing_series_dir(series_name, search_paths)
+    if existing is not None:
+        return existing
+    base = new_manga_path or (search_paths[0] if search_paths else ".")
+    return Path(base) / _safe_name(series_name)
+
+
 def _chapter_number(chapter: dict) -> float:
     raw = chapter.get("attributes", {}).get("chapter") or "0"
     try:
@@ -279,12 +346,22 @@ def download_manga(
     max_chapters: int,
     state: dict,
     status_callback=None,
+    search_paths: Optional[list[str]] = None,
+    new_manga_path: Optional[str] = None,
 ) -> tuple[int, str, list[float]]:
     """
     Check for and download new chapters for one manga.
 
+    search_paths    : all NAS paths to search for an existing series folder.
+                      Defaults to [nas_path] when not provided.
+    new_manga_path  : where to place a brand-new series. Defaults to nas_path.
+
     Returns (count, series_title, [chapter_nums_downloaded]).
     """
+    if search_paths is None:
+        search_paths = [nas_path]
+    if new_manga_path is None:
+        new_manga_path = nas_path
     def _status(msg: str, level: str = "info"):
         log.info(msg)
         if status_callback:
@@ -302,7 +379,9 @@ def download_manga(
 
     _status(f"[MangaDex] {series_name} — checking for new chapters...", "manga")
 
-    series_dir = Path(nas_path) / _safe_name(series_name)
+    # Use the existing folder if this series already lives on any NAS path;
+    # otherwise route a brand-new series to the configured new-manga path.
+    series_dir = resolve_series_dir(series_name, search_paths, new_manga_path)
     series_dir.mkdir(parents=True, exist_ok=True)
 
     # Sync state from NAS so we never re-download chapters already on disk
@@ -322,119 +401,154 @@ def download_manga(
                 state.setdefault(manga_id, {})["cover_url"] = cover_url
                 save_state(state)
 
+    # Write ComicInfo.xml sidecar if it doesn't exist yet
+    comicinfo_path = series_dir / "ComicInfo.xml"
+    if not comicinfo_path.exists():
+        try:
+            meta = api.get_manga_metadata(manga_info)
+            ci_data = ComicInfoData(
+                series      = series_name,
+                summary     = meta.get("summary", ""),
+                genres      = meta.get("genres", ""),
+                tags        = meta.get("tags", ""),
+                writer      = meta.get("writer", ""),
+                penciller   = meta.get("penciller", ""),
+                publisher   = meta.get("publisher", ""),
+                age_rating  = meta.get("age_rating", ""),
+                language    = language,
+            )
+            ci_mod.write_sidecar(series_dir, ci_data)
+            log.info("  [META] Wrote ComicInfo.xml for %s", series_name)
+        except Exception as exc:
+            log.warning("  [META] Could not write ComicInfo.xml for %s: %s", series_name, exc)
+
     downloaded = 0
     downloaded_chapters: list[float] = []
-    batch_size = max_chapters if max_chapters else None
 
-    while True:
-        try:
-            chapters = api.get_chapters(manga_id, language=language, after_chapter=highest_chapter)
-        except Exception as exc:
-            log.error("Could not fetch chapters for %s: %s", manga_id, exc)
-            break
+    # ── Fetch the full chapter list from MangaDex (no after_chapter filter).
+    # We always fetch all chapters so we can detect and fill gaps — e.g. if
+    # ch.14 failed in a previous scan but ch.15-20 succeeded, highest_chapter
+    # would be 20 and an after_chapter=20 filter would skip the gap forever.
+    try:
+        all_chapters = api.get_chapters(manga_id, language=language)
+    except Exception as exc:
+        log.error("Could not fetch chapters for %s: %s", manga_id, exc)
+        return 0, series_name, []
 
-        if not chapters:
-            if downloaded == 0:
-                _status(f"[MangaDex] {series_name} — up to date, no new chapters.", "uptodate")
-            else:
-                _status(f"[MangaDex] {series_name} — done! {downloaded} chapter(s) saved.", "done")
-            break
+    if not all_chapters:
+        _status(f"[MangaDex] {series_name} — no chapters available on MangaDex.", "uptodate")
+        return 0, series_name, []
 
-        # Guard: if this is a brand-new series (nothing downloaded yet) and the
-        # earliest available chapter is not chapter 1, don't start mid-series.
-        # This prevents grabbing e.g. only chapter 36 when chapters 1-35 are
-        # unavailable/blocked on MangaDex.
-        if highest_chapter is None:
-            min_chap = min(_chapter_number(c) for c in chapters)
-            if min_chap > 1:
-                _status(
-                    f"[MangaDex] {series_name} — skipping: earliest available chapter is "
-                    f"Ch.{min_chap:.4g}, not Ch.1. Will not start mid-series.",
-                    "skip",
-                )
-                break
+    # ── Determine which chapters are actually missing from disk.
+    # Checking file existence is the ground truth — state.json may be stale.
+    missing = [
+        c for c in all_chapters
+        if not (series_dir / _cbz_filename(series_name, c)).exists()
+    ]
 
-        total_remaining = len(chapters)
-        batch = chapters[:batch_size] if batch_size else chapters
+    if not missing:
+        _status(f"[MangaDex] {series_name} — up to date, no new chapters.", "uptodate")
+        return 0, series_name, []
+
+    # ── Guard: don't start a brand-new series mid-way through.
+    # Only applies when nothing is on disk yet (nas_chapters is empty).
+    nas_chapters = scan_nas_for_chapters(series_dir)
+    if not nas_chapters:
+        min_chap = min(_chapter_number(c) for c in missing)
+        if min_chap > 1:
+            _status(
+                f"[MangaDex] {series_name} — skipping: earliest available chapter is "
+                f"Ch.{min_chap:.4g}, not Ch.1. Will not start mid-series.",
+                "skip",
+            )
+            return 0, series_name, []
+
+    # ── Apply optional per-scan batch limit then download.
+    to_download = missing[:max_chapters] if max_chapters else missing
+    gap_count   = len(missing) - len([c for c in missing
+                                      if _chapter_number(c) > (highest_chapter or 0)])
+    if gap_count > 0:
         _status(
-            f"[MangaDex] {series_name} — {total_remaining} new chapter(s) found, downloading...",
+            f"[MangaDex] {series_name} — {len(missing)} chapter(s) needed "
+            f"({gap_count} gap(s) + new), downloading {len(to_download)}...",
+            "manga"
+        )
+    else:
+        _status(
+            f"[MangaDex] {series_name} — {len(missing)} new chapter(s) found, "
+            f"downloading {len(to_download)}...",
             "manga"
         )
 
-        for idx, chapter in enumerate(batch, 1):
-            chap_num = _chapter_number(chapter)
-            chap_id = chapter["id"]
-            cbz_name = _cbz_filename(series_name, chapter)
-            cbz_path = series_dir / cbz_name
+    for idx, chapter in enumerate(to_download, 1):
+        chap_num = _chapter_number(chapter)
+        chap_id  = chapter["id"]
+        cbz_path = series_dir / _cbz_filename(series_name, chapter)
 
+        # Double-check: another thread may have downloaded this since we built
+        # the missing list.
+        if cbz_path.exists():
+            continue
+
+        _status(
+            f"[MangaDex] {series_name} — Ch.{chap_num:.4g} ({idx}/{len(to_download)}) downloading...",
+            "progress"
+        )
+
+        # Get page URLs
+        try:
+            page_urls = api.get_chapter_pages(chap_id, quality=image_quality)
+        except Exception as exc:
+            log.error("Could not get page URLs for chapter %s: %s", chap_id, exc)
+            continue
+
+        if not page_urls:
+            log.warning("Chapter %s has no pages — skipping", chap_id)
+            continue
+
+        # Download pages
+        pages: list[bytes] = []
+        failed = False
+        for url in page_urls:
+            try:
+                img = api.download_image(url)
+                pages.append(img)
+                time.sleep(page_delay)
+            except Exception as exc:
+                log.error("Page download failed (%s): %s", url, exc)
+                failed = True
+                break
+
+        if failed:
+            _status(f"[MangaDex] {series_name} — Ch.{chap_num:.4g} failed, skipping.", "error")
+            continue
+
+        # Package into CBZ
+        try:
+            _build_cbz(pages, cbz_path)
+        except Exception as exc:
+            log.error("Failed to write CBZ: %s", exc)
             if cbz_path.exists():
-                if highest_chapter is None or chap_num > highest_chapter:
-                    highest_chapter = chap_num
-                continue
+                cbz_path.unlink()
+            continue
 
-            _status(
-                f"[MangaDex] {series_name} — Ch.{chap_num:.4g} ({idx}/{len(batch)}) downloading...",
-                "progress"
-            )
+        _status(
+            f"[MangaDex] {series_name} — Ch.{chap_num:.4g} saved ({len(pages)} pages)",
+            "saved"
+        )
+        downloaded += 1
+        downloaded_chapters.append(chap_num)
 
-            # Get page URLs
-            try:
-                page_urls = api.get_chapter_pages(chap_id, quality=image_quality)
-            except Exception as exc:
-                log.error("Could not get page URLs for chapter %s: %s", chap_id, exc)
-                continue
+        new_highest = chap_num if (highest_chapter is None or chap_num > highest_chapter) else highest_chapter
+        with _state_lock:
+            set_last_chapter(state, manga_id, new_highest, series_name)
+            record_chapter_download(state, manga_id, chap_num)
+            save_state(state)
+        highest_chapter = new_highest
 
-            if not page_urls:
-                log.warning("Chapter %s has no pages - skipping", chap_id)
-                continue
+        time.sleep(chapter_delay)
 
-            # Download pages
-            pages: list[bytes] = []
-            failed = False
-            for url in page_urls:
-                try:
-                    img = api.download_image(url)
-                    pages.append(img)
-                    time.sleep(page_delay)
-                except Exception as exc:
-                    log.error("Page download failed (%s): %s", url, exc)
-                    failed = True
-                    break
-
-            if failed:
-                _status(f"[MangaDex] {series_name} — Ch.{chap_num:.4g} failed, skipping.", "error")
-                continue
-
-            # Package into CBZ
-            try:
-                _build_cbz(pages, cbz_path)
-            except Exception as exc:
-                log.error("Failed to write CBZ: %s", exc)
-                if cbz_path.exists():
-                    cbz_path.unlink()
-                continue
-
-            _status(
-                f"[MangaDex] {series_name} — Ch.{chap_num:.4g} saved ({len(pages)} pages)",
-                "saved"
-            )
-            downloaded += 1
-            downloaded_chapters.append(chap_num)
-
-            if highest_chapter is None or chap_num > highest_chapter:
-                highest_chapter = chap_num
-
-            if highest_chapter is not None:
-                with _state_lock:
-                    set_last_chapter(state, manga_id, highest_chapter, series_name)
-                    record_chapter_download(state, manga_id, chap_num)
-                    save_state(state)
-
-            time.sleep(chapter_delay)
-
-        if not batch_size or total_remaining <= batch_size:
-            if downloaded > 0:
-                _status(f"[MangaDex] {series_name} — done! {downloaded} chapter(s) saved.", "done")
-            break
+    if downloaded > 0:
+        _status(f"[MangaDex] {series_name} — done! {downloaded} chapter(s) saved.", "done")
 
     return downloaded, series_name, downloaded_chapters

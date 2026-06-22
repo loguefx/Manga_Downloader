@@ -48,7 +48,9 @@ _DEFAULT_CONFIG = """\
 # Manga Downloader — configuration file
 # Edit this file or use the web UI at http://localhost:8080/config
 
-nas_path: "C:/Manga"          # folder where CBZ chapters are saved
+nas_path: "C:/Manga"          # primary folder where CBZ chapters are saved
+additional_nas_paths: []      # extra NAS paths to search for existing series
+new_manga_nas_path: ""        # where NEW manga go (empty = use nas_path)
 check_interval_hours: 6       # how often to auto-scan for new chapters
 language: "en"
 image_quality: "data"         # "data" = full quality, "data-saver" = compressed
@@ -62,6 +64,8 @@ discord_webhook_url: ""    # paste your Discord webhook URL here to enable notif
 manga: []                     # add MangaDex manga via the Config page
 
 third_party_sites: []         # add third-party scrapers via the Config page
+
+webtoon_series: []            # add Webtoon series via the Config page
 """
 
 def _ensure_config() -> None:
@@ -85,7 +89,7 @@ def _ensure_config() -> None:
     if seed:
         import shutil
         shutil.copy2(seed, CONFIG_PATH)
-        log.info("Deployed bundled config.yaml (%d series) to %s", CONFIG_PATH)
+        log.info("Deployed bundled config.yaml to %s", CONFIG_PATH)
     else:
         CONFIG_PATH.write_text(_DEFAULT_CONFIG, encoding="utf-8")
         log.info("Created default config.yaml at %s", CONFIG_PATH)
@@ -173,6 +177,8 @@ def _run_single_scan_thread(item_id: str, source: str) -> None:
             state = downloader.load_state()
 
             nas_path      = cfg.get("nas_path", "./manga")
+            search_paths  = downloader.get_nas_search_paths(cfg) or [nas_path]
+            new_manga_path = downloader.get_new_manga_nas_path(cfg) or nas_path
             language      = cfg.get("language", "en")
             image_quality = cfg.get("image_quality", "data")
             page_delay    = float(cfg.get("page_delay_seconds", 0.5))
@@ -184,7 +190,7 @@ def _run_single_scan_thread(item_id: str, source: str) -> None:
                 entry = next(
                     (e for e in cfg.get("manga", []) if e.get("id") == item_id), {}
                 )
-                chapters_downloaded = downloader.download_manga(
+                count, _title, _chaps = downloader.download_manga(
                     manga_id=item_id,
                     config_name=entry.get("name"),
                     nas_path=nas_path,
@@ -195,7 +201,10 @@ def _run_single_scan_thread(item_id: str, source: str) -> None:
                     max_chapters=max_chapters,
                     state=state,
                     status_callback=cb,
+                    search_paths=search_paths,
+                    new_manga_path=new_manga_path,
                 )
+                chapters_downloaded = count
             else:
                 import re as _re
                 site_cfg = next(
@@ -212,6 +221,8 @@ def _run_single_scan_thread(item_id: str, source: str) -> None:
                         chapter_delay=chapter_delay,
                         state=state,
                         status_callback=cb,
+                        search_paths=search_paths,
+                        new_manga_path=new_manga_path,
                     )
 
             # ── Post-download: trigger Komga rescan ───────────────────────────
@@ -317,18 +328,35 @@ def _safe_folder_name(name: str) -> str:
     return _re.sub(r'[\\/*?:"<>|]', "_", name).strip()
 
 
-def _scan_nas_series(nas_path: str, folder_name: str):
+def _scan_nas_series(nas_paths, folder_name: str):
     """
-    Scan a manga folder on the NAS and return:
+    Scan a manga folder across one or more NAS paths and return:
       (cbz_count, newest_mtime_iso, highest_chapter_num)
+
+    nas_paths may be a single path string or a list of paths. The first path
+    that contains the series folder is used.
 
     Falls back gracefully if the folder doesn't exist or is unreachable.
     """
     try:
         from datetime import timezone
         import re as _re
-        series_dir = Path(nas_path) / folder_name
-        if not series_dir.exists():
+
+        if isinstance(nas_paths, str):
+            nas_paths = [nas_paths]
+
+        series_dir = None
+        for base in nas_paths:
+            if not base:
+                continue
+            candidate = Path(base) / folder_name
+            try:
+                if candidate.exists():
+                    series_dir = candidate
+                    break
+            except OSError:
+                continue
+        if series_dir is None:
             return 0, None, None
 
         cbz_files = list(series_dir.glob("*.cbz"))
@@ -367,6 +395,7 @@ def api_manga():
         cfg   = _load_config()
         state = _load_state()
         nas_path = cfg.get("nas_path", "")
+        search_paths = downloader.get_nas_search_paths(cfg) or [nas_path]
         result = []
 
         def _safe_chapters(chapters_map):
@@ -393,7 +422,7 @@ def api_manga():
             series_name  = entry.get("name") or manga_state.get("title") or manga_id
             folder_name  = _safe_folder_name(series_name)
 
-            nas_count, nas_newest, nas_highest = _scan_nas_series(nas_path, folder_name)
+            nas_count, nas_newest, nas_highest = _scan_nas_series(search_paths, folder_name)
 
             chapter_list = _safe_chapters(chapters_map)
             last_dl = chapter_list[0]["downloaded_at"] if chapter_list else (nas_newest or "")
@@ -419,7 +448,7 @@ def api_manga():
             site_state  = state.get(state_key, {}) if isinstance(state.get(state_key), dict) else {}
             chapters_map = site_state.get("chapters", {})
 
-            nas_count, nas_newest, nas_highest = _scan_nas_series(nas_path, _safe_folder_name(nas_folder))
+            nas_count, nas_newest, nas_highest = _scan_nas_series(search_paths, _safe_folder_name(nas_folder))
 
             chapter_list = _safe_chapters(chapters_map)
             last_dl = chapter_list[0]["downloaded_at"] if chapter_list else (nas_newest or "")
@@ -452,12 +481,17 @@ def api_cover(manga_name):
     from flask import redirect
     cfg  = _load_config()
     nas_path = cfg.get("nas_path", "")
+    search_paths = downloader.get_nas_search_paths(cfg) or [nas_path]
 
-    # Try NAS first (safe name then raw name)
-    for folder in [downloader._safe_name(manga_name), manga_name]:
-        p = Path(nas_path) / folder / "folder.jpg"
-        if p.exists():
-            return send_file(p, mimetype="image/jpeg")
+    # Try every NAS path (safe name then raw name)
+    for base in search_paths:
+        for folder in [downloader._safe_name(manga_name), manga_name]:
+            p = Path(base) / folder / "folder.jpg"
+            try:
+                if p.exists():
+                    return send_file(p, mimetype="image/jpeg")
+            except OSError:
+                continue
 
     # NAS not reachable — look up the cached CDN URL from state
     state = downloader.load_state()
@@ -631,6 +665,100 @@ def api_check_mangadex(manga_id: str):
         return jsonify({"downloadable": False, "reason": str(exc)})
 
 
+@app.route("/api/refresh-metadata", methods=["POST"])
+def api_refresh_metadata():
+    """
+    Walk every series folder on the NAS and write ComicInfo.xml if missing.
+    Runs in a background thread; returns immediately with a job-started message.
+    """
+    import comicinfo as ci_mod
+    from comicinfo import ComicInfoData
+    import mangadex_api as mapi
+
+    cfg      = _load_config()
+    nas_path = cfg.get("nas_path", "")
+    search_paths = downloader.get_nas_search_paths(cfg) or [nas_path]
+    if not nas_path:
+        return jsonify({"success": False, "message": "NAS path not configured."}), 400
+
+    def _run():
+        manga_list     = cfg.get("manga", [])
+        webtoon_list   = cfg.get("webtoon_series", [])
+        written = 0
+        skipped = 0
+
+        # ── MangaDex series ──────────────────────────────────────────────────
+        for entry in manga_list:
+            manga_id    = entry.get("id", "").strip()
+            config_name = entry.get("name", "").strip() or None
+            if not manga_id:
+                continue
+            try:
+                manga_info  = mapi.get_manga_info(manga_id)
+                series_name = config_name or mapi.get_manga_title(manga_info)
+                series_dir  = downloader.find_existing_series_dir(series_name, search_paths)
+                if series_dir is None:
+                    continue
+                ci_path = series_dir / "ComicInfo.xml"
+                if ci_path.exists():
+                    skipped += 1
+                    continue
+                meta    = mapi.get_manga_metadata(manga_info)
+                ci_data = ComicInfoData(
+                    series     = series_name,
+                    summary    = meta.get("summary", ""),
+                    genres     = meta.get("genres", ""),
+                    tags       = meta.get("tags", ""),
+                    writer     = meta.get("writer", ""),
+                    penciller  = meta.get("penciller", ""),
+                    age_rating = meta.get("age_rating", ""),
+                    language   = cfg.get("language", "en"),
+                )
+                ci_mod.write_sidecar(series_dir, ci_data)
+                log.info("[meta-refresh] Wrote ComicInfo.xml for %s", series_name)
+                written += 1
+                import time as _t; _t.sleep(0.4)   # polite MangaDex rate limit
+            except Exception as exc:
+                log.warning("[meta-refresh] Failed for %s: %s", manga_id, exc)
+
+        # ── Webtoon series ───────────────────────────────────────────────────
+        from scrapers import webtoon as wt
+        for wt_cfg in webtoon_list:
+            if not wt_cfg.get("enabled", True):
+                continue
+            wt_name  = wt_cfg.get("name", "")
+            wt_url   = wt_cfg.get("url", "")
+            wt_folder= wt_cfg.get("nas_folder") or wt_name
+            series_dir = downloader.find_existing_series_dir(wt_folder, search_paths)
+            if series_dir is None:
+                continue
+            ci_path = series_dir / "ComicInfo.xml"
+            if ci_path.exists():
+                skipped += 1
+                continue
+            try:
+                meta    = wt.get_series_metadata(wt_url)
+                ci_data = ComicInfoData(
+                    series    = wt_name,
+                    summary   = meta.get("summary", ""),
+                    genres    = meta.get("genres", ""),
+                    tags      = meta.get("tags", ""),
+                    writer    = meta.get("writer", ""),
+                    publisher = "Webtoon",
+                    language  = "en",
+                )
+                ci_mod.write_sidecar(series_dir, ci_data)
+                log.info("[meta-refresh] Wrote ComicInfo.xml for %s", wt_name)
+                written += 1
+            except Exception as exc:
+                log.warning("[meta-refresh] Failed for webtoon %s: %s", wt_name, exc)
+
+        log.info("[meta-refresh] Done. Written: %d, Already existed: %d", written, skipped)
+
+    threading.Thread(target=_run, daemon=True, name="meta-refresh").start()
+    return jsonify({"success": True, "message": "Metadata refresh started in background."})
+
+
 @app.route("/api/cleanup/blocked", methods=["POST"])
 def api_cleanup_blocked():
     """
@@ -647,6 +775,7 @@ def api_cleanup_blocked():
     state    = downloader.load_state()
     language = cfg.get("language", "en")
     nas_path = cfg.get("nas_path", "./manga")
+    search_paths = downloader.get_nas_search_paths(cfg) or [nas_path]
 
     manga_list = cfg.get("manga", [])
     removed: list[dict] = []
@@ -672,10 +801,10 @@ def api_cleanup_blocked():
             kept.append(entry)
             continue
 
-        # ── Blocked: purge NAS folder ──────────────────────────────────────
-        series_dir = Path(nas_path) / downloader._safe_name(name)
+        # ── Blocked: purge NAS folder (wherever it lives) ──────────────────
+        series_dir = downloader.find_existing_series_dir(name, search_paths)
         nas_deleted = False
-        if series_dir.exists():
+        if series_dir is not None:
             try:
                 shutil.rmtree(series_dir)
                 nas_deleted = True

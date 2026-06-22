@@ -368,6 +368,24 @@ async function triggerCleanup() {
   }
 }
 
+async function triggerMetadataRefresh() {
+  const btn = document.getElementById("metaRefreshBtn");
+  if (!confirm(
+    "This will write a ComicInfo.xml sidecar file into every manga series folder that is missing one.\n\n" +
+    "Existing ComicInfo.xml files are left untouched. The job runs in the background.\n\nContinue?"
+  )) return;
+
+  if (btn) { btn.disabled = true; btn.textContent = "⏳ Starting…"; }
+  try {
+    const r = await fetch("/api/refresh-metadata", { method: "POST" }).then(r => r.json());
+    alert(r.message || "Metadata refresh started. Check the server log for progress.");
+  } catch (e) {
+    alert("Metadata refresh failed: " + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "📄 Refresh Metadata"; }
+  }
+}
+
 /* ── MangaDex Search ─────────────────────────────────────────────────────────── */
 
 let _searchTimeout = null;
@@ -443,6 +461,8 @@ async function initConfig() {
 
 function populateForm(cfg) {
   setValue("nas_path",              cfg.nas_path ?? "");
+  setValue("new_manga_nas_path",    cfg.new_manga_nas_path ?? "");
+  renderNasPathsTable(cfg.additional_nas_paths ?? []);
   setValue("check_interval_hours",  cfg.check_interval_hours ?? 6);
   setValue("language",              cfg.language ?? "en");
   setValue("image_quality",         cfg.image_quality ?? "data");
@@ -459,11 +479,44 @@ function populateForm(cfg) {
 
   renderMangaTable(cfg.manga ?? []);
   renderSitesTable(cfg.third_party_sites ?? []);
+  renderWebtoonTable(cfg.webtoon_series ?? []);
 }
 
 function setValue(id, val) {
   const el = document.getElementById(id);
   if (el) el.value = val;
+}
+
+function renderNasPathsTable(list) {
+  const tbody = document.getElementById("nasPathsBody");
+  if (!tbody) return;
+  tbody.innerHTML = list.map((p, i) => `
+    <tr>
+      <td style="font-family:monospace;font-size:12px">${escHtml(p)}</td>
+      <td><button class="btn btn-danger" onclick="removeNasPathRow(${i})">Remove</button></td>
+    </tr>`).join("");
+  tbody._list = list.slice();
+}
+
+function addNasPathRow() {
+  const input = document.getElementById("newNasPathInput");
+  const val = input.value.trim();
+  if (!val) { alert("Please enter a NAS path."); return; }
+  const tbody = document.getElementById("nasPathsBody");
+  const list = tbody._list || [];
+  if (list.includes(val)) { alert("This path is already in the list."); return; }
+  list.push(val);
+  renderNasPathsTable(list);
+  input.value = "";
+  saveConfig(true);
+}
+
+function removeNasPathRow(idx) {
+  const tbody = document.getElementById("nasPathsBody");
+  const list = tbody._list || [];
+  list.splice(idx, 1);
+  renderNasPathsTable(list);
+  saveConfig(true);
 }
 
 function renderMangaTable(list) {
@@ -516,6 +569,8 @@ async function saveConfig(silent = false) {
   const newCfg = {
     ..._currentConfig,
     nas_path:              document.getElementById("nas_path").value.trim(),
+    new_manga_nas_path:    (document.getElementById("new_manga_nas_path")?.value ?? "").trim(),
+    additional_nas_paths:  (document.getElementById("nasPathsBody")?._list || []),
     check_interval_hours:  parseFloat(document.getElementById("check_interval_hours").value),
     language:              document.getElementById("language").value.trim(),
     image_quality:         document.getElementById("image_quality").value,
@@ -530,6 +585,7 @@ async function saveConfig(silent = false) {
     komga_library_id:      (document.getElementById("komga_library_id")?.value ?? "").trim(),
     manga: (tbody._list || []),
     third_party_sites: (sitesTbody._list || []),
+    webtoon_series: (document.getElementById("webtoonTableBody")?._list || []),
     scrapers: {}
   };
 
@@ -608,6 +664,64 @@ function removeSiteRow(idx) {
   const list  = tbody._list || [];
   list.splice(idx, 1);
   renderSitesTable(list);
+  saveConfig(true);
+}
+
+/* ── Webtoon series table ─────────────────────────────────────────────────── */
+
+function renderWebtoonTable(list) {
+  const tbody = document.getElementById("webtoonTableBody");
+  if (!tbody) return;
+  tbody.innerHTML = list.map((s, i) => `
+    <tr id="webtoon-row-${i}">
+      <td><strong>${escHtml(s.name ?? "")}</strong></td>
+      <td style="word-break:break-all;font-size:11px">${escHtml(s.url ?? "")}</td>
+      <td>${escHtml(s.nas_folder ?? s.name ?? "")}</td>
+      <td>
+        <label class="toggle" style="margin:0">
+          <input type="checkbox" ${s.enabled !== false ? "checked" : ""}
+                 onchange="toggleWebtoon(${i}, this.checked)" />
+          <span class="toggle-slider"></span>
+        </label>
+      </td>
+      <td><button class="btn btn-danger" onclick="removeWebtoonRow(${i})">Remove</button></td>
+    </tr>`).join("");
+  tbody._list = list.slice();
+  const lbl = document.getElementById("webtoonCountLabel");
+  if (lbl) lbl.textContent = list.length;
+}
+
+function toggleWebtoon(idx, enabled) {
+  const tbody = document.getElementById("webtoonTableBody");
+  if (tbody._list) tbody._list[idx].enabled = enabled;
+}
+
+function addWebtoonRow() {
+  const name   = document.getElementById("newWebtoonName").value.trim();
+  const url    = document.getElementById("newWebtoonUrl").value.trim();
+  const folder = document.getElementById("newWebtoonFolder").value.trim() || name;
+
+  if (!name || !url) { alert("Series name and URL are required."); return; }
+  if (!url.includes("webtoons.com")) { alert("URL must be from webtoons.com"); return; }
+
+  const tbody = document.getElementById("webtoonTableBody");
+  const list  = tbody._list || [];
+  if (list.some(s => s.url === url)) { alert("This series is already in your list."); return; }
+
+  list.push({ name, url, nas_folder: folder, enabled: true });
+  renderWebtoonTable(list);
+
+  document.getElementById("newWebtoonName").value   = "";
+  document.getElementById("newWebtoonUrl").value    = "";
+  document.getElementById("newWebtoonFolder").value = "";
+  saveConfig(true);
+}
+
+function removeWebtoonRow(idx) {
+  const tbody = document.getElementById("webtoonTableBody");
+  const list  = tbody._list || [];
+  list.splice(idx, 1);
+  renderWebtoonTable(list);
   saveConfig(true);
 }
 

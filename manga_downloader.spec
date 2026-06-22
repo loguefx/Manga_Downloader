@@ -34,9 +34,11 @@ a = Analysis(
         'downloader',
         'scheduler',
         'mangadex_api',
+        'comicinfo',
         'scrapers',
         'scrapers.generic_site',
         'scrapers.onepiece',
+        'scrapers.webtoon',
         # Dependencies
         'yaml',
         'requests',

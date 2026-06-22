@@ -13,7 +13,7 @@ import requests
 import yaml
 
 import downloader
-from scrapers import generic_site
+from scrapers import generic_site, webtoon as webtoon_scraper
 
 from paths import CONFIG_PATH
 log = logging.getLogger(__name__)
@@ -52,12 +52,21 @@ def run_download_cycle(status_callback=None) -> int:
 
     cfg = load_config()
     nas_path: str = cfg.get("nas_path", "./manga")
+    search_paths: list = downloader.get_nas_search_paths(cfg) or [nas_path]
+    new_manga_path: str = downloader.get_new_manga_nas_path(cfg) or nas_path
     language: str = cfg.get("language", "en")
     image_quality: str = cfg.get("image_quality", "data")
     page_delay: float = float(cfg.get("page_delay_seconds", 0.5))
     chapter_delay: float = float(cfg.get("chapter_delay_seconds", 2))
     max_chapters: int = int(cfg.get("max_chapters_per_run", 0))
     manga_list: list = cfg.get("manga", [])
+
+    if len(search_paths) > 1:
+        _status(
+            f"NAS paths: searching {len(search_paths)} location(s); "
+            f"new manga → {new_manga_path}",
+            "info"
+        )
 
     state = downloader.load_state()
 
@@ -103,6 +112,8 @@ def run_download_cycle(status_callback=None) -> int:
                 max_chapters=max_chapters,
                 state=state,
                 status_callback=status_callback,
+                search_paths=search_paths,
+                new_manga_path=new_manga_path,
             )
         except Exception as exc:
             log.exception("Unexpected error processing manga %s: %s", manga_id, exc)
@@ -133,10 +144,34 @@ def run_download_cycle(status_callback=None) -> int:
                 chapter_delay=chapter_delay,
                 state=state,
                 status_callback=status_callback,
+                search_paths=search_paths,
+                new_manga_path=new_manga_path,
             )
             total_downloaded += count
         except Exception as exc:
             log.exception("Third-party scraper error for %s: %s", site_name, exc)
+
+    # ── Webtoon series ─────────────────────────────────────────────────────────
+    for wt_cfg in cfg.get("webtoon_series", []):
+        if not wt_cfg.get("enabled", True):
+            continue
+        wt_name = wt_cfg.get("name", "Unknown Webtoon")
+        try:
+            count, title, chapters = webtoon_scraper.download_new_episodes(
+                site_cfg=wt_cfg,
+                nas_path=nas_path,
+                page_delay=page_delay,
+                chapter_delay=chapter_delay,
+                state=state,
+                status_callback=status_callback,
+                search_paths=search_paths,
+                new_manga_path=new_manga_path,
+            )
+            total_downloaded += count
+            if chapters and title:
+                scan_downloads[title] = sorted(set(scan_downloads.get(title, []) + chapters))
+        except Exception as exc:
+            log.exception("Webtoon scraper error for %s: %s", wt_name, exc)
 
     _status(f"Scan complete — {total_downloaded} new chapter(s) downloaded total.", "done")
 
