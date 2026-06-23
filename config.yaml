@@ -2,7 +2,7 @@ additional_nas_paths:
 - //192.168.0.181/Jellyfin6/Manga
 chapter_delay_seconds: 2
 check_interval_hours: 6
-discord_webhook_url: https://discord.com/api/webhooks/1508600530195185796/-EqUbgWG81CiaKE4AVgcvgSgCytIXUe94jIGnq6Rr88zq_aUUAZTZdOzLK3zqL4iOsOx
+discord_webhook_url: ''
 image_quality: data
 komga_library_id: ''
 komga_password: ''

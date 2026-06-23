@@ -15,7 +15,7 @@ import yaml
 import downloader
 from scrapers import generic_site, webtoon as webtoon_scraper
 
-from paths import CONFIG_PATH
+from paths import CONFIG_PATH, SECRETS_PATH
 log = logging.getLogger(__name__)
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -28,7 +28,21 @@ def load_config() -> dict:
     if not CONFIG_PATH.exists():
         return {}
     with CONFIG_PATH.open("r", encoding="utf-8") as fh:
-        return yaml.safe_load(fh) or {}
+        cfg = yaml.safe_load(fh) or {}
+
+    # Overlay local-only secrets (Discord webhook, Komga creds) that are kept
+    # out of the committed config.yaml.
+    if SECRETS_PATH.exists():
+        try:
+            with SECRETS_PATH.open("r", encoding="utf-8") as fh:
+                secrets = yaml.safe_load(fh) or {}
+            for k, v in secrets.items():
+                if v:
+                    cfg[k] = v
+        except Exception as exc:
+            log.warning("Could not read secrets.yaml: %s", exc)
+
+    return cfg
 
 
 def run_download_cycle(status_callback=None) -> int:

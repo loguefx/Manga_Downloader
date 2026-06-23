@@ -28,8 +28,9 @@ if hasattr(sys.stderr, "reconfigure"):
 
 APP_VERSION = "1.2.6"
 
-CONFIG_PATH = paths.CONFIG_PATH
-STATE_FILE  = paths.STATE_FILE
+CONFIG_PATH  = paths.CONFIG_PATH
+SECRETS_PATH = paths.SECRETS_PATH
+STATE_FILE   = paths.STATE_FILE
 
 app = Flask(__name__, template_folder=paths.TEMPLATE_FOLDER, static_folder=paths.STATIC_FOLDER)
 log = logging.getLogger(__name__)
@@ -94,13 +95,60 @@ def _ensure_config() -> None:
         CONFIG_PATH.write_text(_DEFAULT_CONFIG, encoding="utf-8")
         log.info("Created default config.yaml at %s", CONFIG_PATH)
 
+# Keys that must NEVER be written to the committed config.yaml. They are stored
+# in a local-only secrets.yaml (git-ignored, not bundled) so they can't leak via
+# the public repo or the seeded EXE.
+_SECRET_KEYS = ("discord_webhook_url", "komga_password", "komga_username")
+
+
 def _load_config() -> dict:
     _ensure_config()
     with CONFIG_PATH.open("r", encoding="utf-8") as fh:
-        return yaml.safe_load(fh) or {}
+        cfg = yaml.safe_load(fh) or {}
+
+    # Overlay any locally-stored secrets so the running app has full settings.
+    if SECRETS_PATH.exists():
+        try:
+            with SECRETS_PATH.open("r", encoding="utf-8") as fh:
+                secrets = yaml.safe_load(fh) or {}
+            for k, v in secrets.items():
+                if v:
+                    cfg[k] = v
+        except Exception as exc:
+            log.warning("Could not read secrets.yaml: %s", exc)
+
+    return cfg
 
 
 def _save_config(data: dict) -> None:
+    data = dict(data)  # shallow copy so we don't mutate the caller's dict
+
+    # Split secret fields into secrets.yaml; strip them from config.yaml.
+    secrets = {}
+    for k in _SECRET_KEYS:
+        if k in data:
+            val = data.pop(k)
+            if val:
+                secrets[k] = val
+
+    # Merge with any secrets already on disk so we never lose existing values.
+    existing_secrets = {}
+    if SECRETS_PATH.exists():
+        try:
+            with SECRETS_PATH.open("r", encoding="utf-8") as fh:
+                existing_secrets = yaml.safe_load(fh) or {}
+        except Exception:
+            existing_secrets = {}
+    existing_secrets.update(secrets)
+
+    if existing_secrets:
+        with SECRETS_PATH.open("w", encoding="utf-8") as fh:
+            yaml.dump(existing_secrets, fh, allow_unicode=True, sort_keys=False)
+
+    # config.yaml: blank out secret keys so the committed/bundled file is clean.
+    for k in _SECRET_KEYS:
+        data[k] = ""
+
     with CONFIG_PATH.open("w", encoding="utf-8") as fh:
         yaml.dump(data, fh, allow_unicode=True, sort_keys=False)
 

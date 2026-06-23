@@ -33,9 +33,10 @@ EXE_DIR    = _exe_dir()
 BUNDLE_DIR = _bundle_dir()
 
 # User-editable / runtime-generated files (sit next to the EXE)
-CONFIG_PATH = EXE_DIR / "config.yaml"
-STATE_FILE  = EXE_DIR / "state.json"
-LOG_FILE    = EXE_DIR / "manga_downloader.log"
+CONFIG_PATH  = EXE_DIR / "config.yaml"
+SECRETS_PATH = EXE_DIR / "secrets.yaml"   # local-only secrets, never committed
+STATE_FILE   = EXE_DIR / "state.json"
+LOG_FILE     = EXE_DIR / "manga_downloader.log"
 
 # Flask asset directories (bundled read-only)
 TEMPLATE_FOLDER = str(BUNDLE_DIR / "templates")
