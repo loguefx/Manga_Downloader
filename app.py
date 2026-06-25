@@ -27,7 +27,7 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
-APP_VERSION = "1.2.24"
+APP_VERSION = "1.2.25"
 
 # GitHub repo used for the in-app updater (public releases).
 GITHUB_REPO = "loguefx/Manga_Downloader"

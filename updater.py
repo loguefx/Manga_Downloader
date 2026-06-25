@@ -133,7 +133,7 @@ def check_for_update(current_version: str, repo: str) -> dict:
 
 
 def get_cached_check(current_version: str, repo: str,
-                     max_age: float = 1800.0, force: bool = False) -> dict:
+                     max_age: float = 600.0, force: bool = False) -> dict:
     """
     Return a cached update-check result if it's fresh, otherwise hit GitHub and
     cache the new result. Used by the dashboard banner so opening the UI doesn't

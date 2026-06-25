@@ -326,7 +326,7 @@ async function checkForUpdate() {
   if (panel) panel.classList.add("hidden");
 
   try {
-    const r = await fetch("/api/update/check").then(r => r.json());
+    const r = await fetch("/api/update/check?force=1").then(r => r.json());
     if (r.error) {
       status.textContent = "✗ Could not reach GitHub: " + r.error;
       status.style.color = "var(--accent)";
