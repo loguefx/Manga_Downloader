@@ -20,13 +20,17 @@ from flask import Flask, jsonify, render_template, request, send_file, abort
 import downloader
 import scheduler as sched
 import paths
+import updater
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
-APP_VERSION = "1.2.6"
+APP_VERSION = "1.2.22"
+
+# GitHub repo used for the in-app updater (public releases).
+GITHUB_REPO = "loguefx/Manga_Downloader"
 
 CONFIG_PATH  = paths.CONFIG_PATH
 SECRETS_PATH = paths.SECRETS_PATH
@@ -34,6 +38,12 @@ STATE_FILE   = paths.STATE_FILE
 
 app = Flask(__name__, template_folder=paths.TEMPLATE_FOLDER, static_folder=paths.STATIC_FOLDER)
 log = logging.getLogger(__name__)
+
+
+@app.context_processor
+def _inject_version():
+    """Make the app version available to every template as {{ app_version }}."""
+    return {"app_version": APP_VERSION}
 
 _scan_lock = threading.Lock()
 _scanning = False
@@ -364,6 +374,29 @@ def api_status():
         "scanning": _scanning,
         "version": APP_VERSION,
     })
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# REST API — self-update
+# ──────────────────────────────────────────────────────────────────────────────
+
+@app.route("/api/update/check")
+def api_update_check():
+    info = updater.check_for_update(APP_VERSION, GITHUB_REPO)
+    info["frozen"] = updater.is_frozen()
+    return jsonify(info)
+
+
+@app.route("/api/update/install", methods=["POST"])
+def api_update_install():
+    result = updater.start_update(APP_VERSION, GITHUB_REPO)
+    code = 200 if result.get("started") else 409
+    return jsonify(result), code
+
+
+@app.route("/api/update/progress")
+def api_update_progress():
+    return jsonify(updater.get_progress())
 
 
 # ──────────────────────────────────────────────────────────────────────────────

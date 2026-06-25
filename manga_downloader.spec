@@ -35,6 +35,7 @@ a = Analysis(
         'scheduler',
         'mangadex_api',
         'comicinfo',
+        'updater',
         'scrapers',
         'scrapers.generic_site',
         'scrapers.onepiece',

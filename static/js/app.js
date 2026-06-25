@@ -285,6 +285,142 @@ async function testDiscordWebhook() {
   setTimeout(() => { if (status) status.textContent = ""; }, 6000);
 }
 
+// ── Application self-update ──────────────────────────────────────────────────
+
+function _fmtBytes(n) {
+  if (!n) return "0 MB";
+  return (n / 1048576).toFixed(1) + " MB";
+}
+
+async function checkForUpdate() {
+  const btn    = document.getElementById("updCheckBtn");
+  const status = document.getElementById("updStatus");
+  const panel  = document.getElementById("updAvailablePanel");
+  if (btn) { btn.disabled = true; btn.textContent = "Checking..."; }
+  if (status) { status.textContent = ""; status.style.color = "var(--text-muted)"; }
+  if (panel) panel.classList.add("hidden");
+
+  try {
+    const r = await fetch("/api/update/check").then(r => r.json());
+    if (r.error) {
+      status.textContent = "✗ Could not reach GitHub: " + r.error;
+      status.style.color = "var(--accent)";
+    } else if (r.update_available) {
+      document.getElementById("updLatestVersion").textContent =
+        "v" + r.latest + "  (" + _fmtBytes(r.size) + ")";
+      document.getElementById("updNotes").textContent = r.notes || "(no release notes)";
+      panel.classList.remove("hidden");
+      status.textContent = "";
+      if (!r.frozen) {
+        status.textContent = "⚠ Running in dev mode — install only works on the packaged EXE.";
+        status.style.color = "var(--accent)";
+      }
+    } else {
+      status.textContent = "✓ You're on the latest version (v" + r.current + ").";
+      status.style.color = "var(--success)";
+    }
+  } catch (e) {
+    status.textContent = "✗ Request failed: " + e.message;
+    status.style.color = "var(--accent)";
+  }
+  if (btn) { btn.disabled = false; btn.textContent = "🔄 Check for Updates"; }
+}
+
+async function installUpdate() {
+  const installBtn = document.getElementById("updInstallBtn");
+  const progPanel  = document.getElementById("updProgressPanel");
+  const bar        = document.getElementById("updProgressBar");
+  const text       = document.getElementById("updProgressText");
+  const label      = document.getElementById("updProgressLabel");
+
+  if (!confirm("Download and install the new version now? The server will restart automatically.")) {
+    return;
+  }
+
+  if (installBtn) installBtn.disabled = true;
+  if (progPanel) progPanel.classList.remove("hidden");
+
+  try {
+    const r = await fetch("/api/update/install", { method: "POST" }).then(r => r.json());
+    if (!r.started) {
+      label.textContent = "✗ " + (r.message || "Could not start update.");
+      if (installBtn) installBtn.disabled = false;
+      return;
+    }
+  } catch (e) {
+    label.textContent = "✗ Request failed: " + e.message;
+    if (installBtn) installBtn.disabled = false;
+    return;
+  }
+
+  _pollUpdateProgress();
+}
+
+let _updatePollTimer = null;
+async function _pollUpdateProgress() {
+  const bar   = document.getElementById("updProgressBar");
+  const text  = document.getElementById("updProgressText");
+  const label = document.getElementById("updProgressLabel");
+
+  try {
+    const p = await fetch("/api/update/progress").then(r => r.json());
+    const pct = p.percent || 0;
+    if (bar) bar.style.width = pct + "%";
+
+    if (p.state === "downloading") {
+      label.textContent = "Downloading v" + (p.version || "") + "…";
+      text.textContent = pct + "%  (" + _fmtBytes(p.downloaded) + " / " + _fmtBytes(p.total) + ")";
+    } else if (p.state === "installing") {
+      label.textContent = "Installing…";
+      text.textContent = p.message || "Installing new version…";
+    } else if (p.state === "restarting") {
+      label.textContent = "♻ Restarting server…";
+      text.textContent = "The service is restarting. This page will reload automatically when it's back.";
+      _waitForServerBack();
+      return;
+    } else if (p.state === "error") {
+      label.textContent = "✗ Update failed";
+      text.textContent = p.message || "Unknown error.";
+      const ib = document.getElementById("updInstallBtn");
+      if (ib) ib.disabled = false;
+      return;
+    } else if (p.state === "done") {
+      label.textContent = "✓ " + (p.message || "Done.");
+      return;
+    }
+  } catch (e) {
+    // Server may already be going down for restart — switch to reconnect mode.
+    label.textContent = "♻ Restarting server…";
+    text.textContent = "Reconnecting…";
+    _waitForServerBack();
+    return;
+  }
+
+  _updatePollTimer = setTimeout(_pollUpdateProgress, 700);
+}
+
+async function _waitForServerBack() {
+  const text = document.getElementById("updProgressText");
+  // Give the service time to stop, swap the EXE, and start again.
+  let attempts = 0;
+  const tryReconnect = async () => {
+    attempts++;
+    try {
+      const r = await fetch("/api/status", { cache: "no-store" }).then(r => r.json());
+      if (r && r.version) {
+        if (text) text.textContent = "✓ Updated to v" + r.version + ". Reloading…";
+        setTimeout(() => window.location.reload(true), 1200);
+        return;
+      }
+    } catch (e) {
+      // still down — keep trying
+    }
+    if (text) text.textContent = "Waiting for server to come back… (" + attempts + ")";
+    setTimeout(tryReconnect, 2000);
+  };
+  setTimeout(tryReconnect, 4000);
+}
+
 async function downloadSingle(mangaId, source, cardId) {
   const btn = document.getElementById(`dl-${cardId}`);
   if (btn) { btn.disabled = true; btn.textContent = "⏳ Downloading..."; }

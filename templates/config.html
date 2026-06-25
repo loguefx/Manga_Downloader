@@ -10,6 +10,45 @@
 
 <div id="saveMsg" class="save-message hidden"></div>
 
+<!-- Application Updates -->
+<div class="config-card">
+  <h3 class="config-card-title">Application Updates</h3>
+  <p class="config-hint">
+    Check GitHub for a newer release and install it remotely. The app downloads the
+    new version, swaps the EXE, and restarts the Windows Service automatically.
+  </p>
+
+  <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+    <div style="font-size:14px">
+      Current version: <strong id="updCurrentVersion">v{{ app_version }}</strong>
+    </div>
+    <button class="btn btn-secondary" id="updCheckBtn" onclick="checkForUpdate()">
+      🔄 Check for Updates
+    </button>
+    <span id="updStatus" style="font-size:13px;color:var(--text-muted)"></span>
+  </div>
+
+  <!-- Update available panel -->
+  <div id="updAvailablePanel" class="hidden" style="margin-top:16px;padding:14px;border:1px solid var(--accent,#5865f2);border-radius:8px;background:rgba(88,101,242,0.06)">
+    <div style="font-size:15px;font-weight:600;margin-bottom:6px">
+      ⬆️ Update available: <span id="updLatestVersion"></span>
+    </div>
+    <pre id="updNotes" style="white-space:pre-wrap;font-size:12px;color:var(--text-secondary);max-height:160px;overflow:auto;margin:8px 0;padding:8px;background:rgba(0,0,0,0.15);border-radius:6px"></pre>
+    <button class="btn btn-primary" id="updInstallBtn" onclick="installUpdate()">
+      ⬇️ Download &amp; Install
+    </button>
+  </div>
+
+  <!-- Download progress -->
+  <div id="updProgressPanel" class="hidden" style="margin-top:16px">
+    <div style="font-size:13px;margin-bottom:6px" id="updProgressLabel">Downloading…</div>
+    <div style="width:100%;height:18px;background:rgba(0,0,0,0.25);border-radius:9px;overflow:hidden">
+      <div id="updProgressBar" style="height:100%;width:0%;background:var(--accent,#5865f2);transition:width 0.3s ease"></div>
+    </div>
+    <div id="updProgressText" style="font-size:12px;color:var(--text-muted);margin-top:6px">0%</div>
+  </div>
+</div>
+
 <!-- General Settings -->
 <div class="config-card">
   <h3 class="config-card-title">General Settings</h3>
