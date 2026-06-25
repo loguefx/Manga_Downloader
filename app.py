@@ -27,7 +27,7 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
-APP_VERSION = "1.2.23"
+APP_VERSION = "1.2.24"
 
 # GitHub repo used for the in-app updater (public releases).
 GITHUB_REPO = "loguefx/Manga_Downloader"
@@ -263,6 +263,28 @@ def _run_single_scan_thread(item_id: str, source: str) -> None:
                     new_manga_path=new_manga_path,
                 )
                 chapters_downloaded = count
+            elif source == "Webtoon":
+                import re as _re
+                wt_cfg = next(
+                    (w for w in cfg.get("webtoon_series", [])
+                     if f"_webtoon_{_re.sub(r'[^a-z0-9]', '_', w.get('name','').lower())}" == item_id),
+                    None,
+                )
+                if wt_cfg:
+                    from scrapers import webtoon as webtoon_scraper
+                    count, _title, _eps = webtoon_scraper.download_new_episodes(
+                        site_cfg=wt_cfg,
+                        nas_path=nas_path,
+                        page_delay=page_delay,
+                        chapter_delay=chapter_delay,
+                        state=state,
+                        status_callback=cb,
+                        search_paths=search_paths,
+                        new_manga_path=new_manga_path,
+                    )
+                    chapters_downloaded = count
+                else:
+                    cb(f"Webtoon series not found in config: {item_id}", "error")
             else:
                 import re as _re
                 site_cfg = next(
@@ -547,6 +569,31 @@ def api_manga():
                 "source":         "3rd Party",
                 "total_chapters": nas_count if nas_count > 0 else len(chapter_list),
                 "latest_chapter": site_state.get("last_chapter") or nas_highest,
+                "chapters":       chapter_list,
+                "_sort_key":      last_dl,
+            })
+
+        # ── Webtoon series ────────────────────────────────────────────────────
+        for wt in cfg.get("webtoon_series", []):
+            if not wt.get("enabled", True):
+                continue
+            wt_name    = wt.get("name", "Unknown Webtoon")
+            nas_folder = wt.get("nas_folder") or wt_name
+            state_key  = f"_webtoon_{_re.sub(r'[^a-z0-9]', '_', wt_name.lower())}"
+            wt_state   = state.get(state_key, {}) if isinstance(state.get(state_key), dict) else {}
+            chapters_map = wt_state.get("chapters", {})
+
+            nas_count, nas_newest, nas_highest = _scan_nas_series(search_paths, _safe_folder_name(nas_folder))
+
+            chapter_list = _safe_chapters(chapters_map)
+            last_dl = chapter_list[0]["downloaded_at"] if chapter_list else (nas_newest or "")
+
+            result.append({
+                "id":             state_key,
+                "name":           wt_name,
+                "source":         "Webtoon",
+                "total_chapters": nas_count if nas_count > 0 else len(chapter_list),
+                "latest_chapter": wt_state.get("last_chapter") or nas_highest,
                 "chapters":       chapter_list,
                 "_sort_key":      last_dl,
             })

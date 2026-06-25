@@ -182,7 +182,9 @@ function buildMangaCard(m) {
       <span class="chapter-date">${c.downloaded_at ? formatDate(c.downloaded_at) : "—"}</span>
     </div>`).join("");
 
-  const srcClass = m.source === 'MangaDex' ? 'mangadex' : m.source === 'Web Scraper' ? 'scraper' : 'third';
+  const srcClass = m.source === 'MangaDex' ? 'mangadex'
+                 : m.source === 'Webtoon'  ? 'webtoon'
+                 : m.source === 'Web Scraper' ? 'scraper' : 'third';
   const cardId   = `card-${m.id.replace(/[^a-z0-9]/gi, "_")}`;
 
   return `

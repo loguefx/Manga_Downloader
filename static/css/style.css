@@ -457,6 +457,7 @@ small { color: var(--text-secondary); font-size: 11px; }
 .manga-source-badge.mangadex  { background: rgba(255,106,0,.15); color: #ff6a00; }
 .manga-source-badge.scraper   { background: rgba(78,204,163,.15); color: var(--success); }
 .manga-source-badge.third     { background: rgba(100,130,255,.15); color: #6482ff; }
+.manga-source-badge.webtoon   { background: rgba(0,219,90,.15); color: #00db5a; }
 
 /* ── Download Now button on manga cards ─────────────────────────────────────── */
 .card-footer-actions {
