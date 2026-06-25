@@ -27,7 +27,7 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
-APP_VERSION = "1.2.22"
+APP_VERSION = "1.2.23"
 
 # GitHub repo used for the in-app updater (public releases).
 GITHUB_REPO = "loguefx/Manga_Downloader"
@@ -302,6 +302,11 @@ def start_scheduler() -> None:
     # Pre-warm cover URLs for all manga that don't have one cached yet
     pw = threading.Thread(target=_prefetch_cover_urls, daemon=True, name="cover-prefetch")
     pw.start()
+    # Check GitHub for a newer release once on startup (cached for the UI banner)
+    uc = threading.Thread(
+        target=updater.startup_check, args=(APP_VERSION, GITHUB_REPO),
+        daemon=True, name="update-check")
+    uc.start()
 
 
 def _prefetch_cover_urls() -> None:
@@ -382,7 +387,9 @@ def api_status():
 
 @app.route("/api/update/check")
 def api_update_check():
-    info = updater.check_for_update(APP_VERSION, GITHUB_REPO)
+    force = request.args.get("force", "").lower() in ("1", "true", "yes")
+    info = updater.get_cached_check(APP_VERSION, GITHUB_REPO, force=force)
+    info = dict(info)
     info["frozen"] = updater.is_frozen()
     return jsonify(info)
 

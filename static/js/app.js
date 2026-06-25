@@ -33,7 +33,30 @@ function formatDate(isoStr) {
 function initDashboard() {
   refreshStatus();
   loadManga();
+  checkUpdateBanner();
   setInterval(refreshStatus, 15000);
+}
+
+async function checkUpdateBanner() {
+  try {
+    const r = await fetch("/api/update/check").then(r => r.json());
+    if (r && r.update_available) {
+      const banner = document.getElementById("updateBanner");
+      const ver = document.getElementById("bannerVersion");
+      if (ver) ver.textContent = "v" + r.latest;
+      if (banner) banner.classList.remove("hidden");
+      const ib = document.getElementById("bannerInstallBtn");
+      if (ib && !r.frozen) {
+        ib.disabled = true;
+        ib.title = "Install only works on the packaged EXE / service.";
+      }
+    }
+  } catch (e) { /* silent — banner just stays hidden */ }
+}
+
+function installFromBanner() {
+  // Send the user to the Config page's Updates card to install with progress.
+  window.location.href = "/config#updates";
 }
 
 async function refreshStatus() {
@@ -593,6 +616,12 @@ let _currentConfig = {};
 async function initConfig() {
   _currentConfig = await fetch("/api/config").then(r => r.json());
   populateForm(_currentConfig);
+  // When arriving from the dashboard's "Update now" banner, jump to and run the check.
+  if (window.location.hash === "#updates") {
+    const card = document.getElementById("updates");
+    if (card) card.scrollIntoView({ behavior: "smooth" });
+    checkForUpdate();
+  }
 }
 
 function populateForm(cfg) {

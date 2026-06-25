@@ -3,6 +3,18 @@
 
 {% block content %}
 
+<!-- Update available banner -->
+<div id="updateBanner" class="hidden" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:16px;padding:12px 16px;border:1px solid var(--accent,#5865f2);border-radius:8px;background:rgba(88,101,242,0.10)">
+  <div style="font-size:14px">
+    ⬆️ <strong>Update available:</strong> <span id="bannerVersion"></span>
+    <span style="color:var(--text-muted)">— a newer version is ready to install.</span>
+  </div>
+  <div style="display:flex;gap:8px">
+    <a class="btn btn-secondary" href="/config#updates" style="font-size:13px;padding:6px 14px">View details</a>
+    <button class="btn btn-primary" id="bannerInstallBtn" onclick="installFromBanner()" style="font-size:13px;padding:6px 14px">Update now</button>
+  </div>
+</div>
+
 <!-- Status Bar -->
 <div class="status-bar" id="statusBar">
   <div class="status-info">

@@ -18,6 +18,13 @@ build/
 state.json
 manga_downloader.log
 
+# Self-updater artifacts
+backups/
+_update.bat
+_update.log
+MangaDownloader.new.exe
+MangaDownloader.old.exe
+
 # Local-only secrets (Discord webhook, Komga creds) — NEVER commit
 secrets.yaml
 

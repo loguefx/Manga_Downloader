@@ -11,9 +11,12 @@ install step is a no-op that reports back an explanatory message.
 
 import logging
 import os
+import shutil
 import subprocess
 import sys
 import threading
+import time
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -47,6 +50,11 @@ def _set(**kw) -> None:
 def get_progress() -> dict:
     with _lock:
         return dict(_progress)
+
+
+# Cached result of the most recent update check (shared by startup check + UI).
+_check_cache = {"result": None, "ts": 0.0}
+_check_lock = threading.Lock()
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -124,6 +132,61 @@ def check_for_update(current_version: str, repo: str) -> dict:
     }
 
 
+def get_cached_check(current_version: str, repo: str,
+                     max_age: float = 1800.0, force: bool = False) -> dict:
+    """
+    Return a cached update-check result if it's fresh, otherwise hit GitHub and
+    cache the new result. Used by the dashboard banner so opening the UI doesn't
+    make a GitHub round-trip every time.
+    """
+    with _check_lock:
+        cached = _check_cache["result"]
+        age = time.time() - _check_cache["ts"]
+        if cached and not force and age < max_age and cached.get("current") == current_version:
+            return cached
+
+    result = check_for_update(current_version, repo)
+    with _check_lock:
+        _check_cache["result"] = result
+        _check_cache["ts"] = time.time()
+    return result
+
+
+def startup_check(current_version: str, repo: str) -> None:
+    """Run one update check shortly after boot and cache it. Logs the outcome."""
+    try:
+        info = get_cached_check(current_version, repo, force=True)
+        if info.get("error"):
+            log.info("Startup update check failed: %s", info["error"])
+        elif info.get("update_available"):
+            log.info("Update available: v%s (current v%s)",
+                     info.get("latest"), current_version)
+        else:
+            log.info("Update check: already on the latest version (v%s).",
+                     current_version)
+    except Exception as exc:
+        log.warning("Startup update check error: %s", exc)
+
+
+def _backup_user_data(exe_dir: Path) -> None:
+    """
+    Copy config.yaml / state.json / secrets.yaml into a timestamped backup folder
+    before swapping the EXE. The updater never overwrites these files, but this is
+    a safety net so manga lists / settings are always recoverable.
+    """
+    try:
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_dir = exe_dir / "backups" / f"pre_update_{stamp}"
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        for name in ("config.yaml", "state.json", "secrets.yaml"):
+            src = exe_dir / name
+            if src.exists():
+                shutil.copy2(src, backup_dir / name)
+        log.info("Backed up user data to %s", backup_dir)
+    except Exception as exc:
+        log.warning("Could not back up user data before update: %s", exc)
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Download + install
 # ──────────────────────────────────────────────────────────────────────────────
@@ -193,8 +256,11 @@ def _run_update(current_version: str, repo: str) -> None:
                 return
 
         _set(state="installing", percent=100,
-             message="Download complete. Preparing to install…")
+             message="Download complete. Backing up settings…")
 
+        _backup_user_data(exe_dir)
+
+        _set(message="Preparing to install…")
         _spawn_swap_script(exe_path, new_path)
 
         _set(state="restarting",
